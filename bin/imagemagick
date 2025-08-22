@@ -1,0 +1,261 @@
+#!/usr/bin/env perl
+
+# preambles {{{
+use warnings;
+use strict;
+use Getopt::Long;
+use File::Basename;
+use Cwd;
+use IO::Handle;
+use POSIX qw(strftime);
+use Term::ANSIColor;
+
+# }}}
+
+# variables {{{
+my $input;
+my $output;
+my $help = 0;
+my $prompt = basename($0);
+# }}}
+
+# flags {{{
+GetOptions(
+    "i|input=s"    => \$input,
+    "o|output=s"   => \$output,
+    'h|help'       => \$help,
+) or die "Invalid flags. Use -h for help\n";
+# }}}
+
+# command {{
+my $cmd = shift @ARGV;
+# }}}
+
+# calculate blank space {{{
+my @subs = (
+    "imshadow",
+    "imtrim",
+    "imround"
+);
+
+my $length = 0;
+foreach my $func (@subs) {
+    my $tl = length($func);
+    if ($tl gt $length) {
+        $length = $tl;
+    }
+}
+# }}}
+
+# functions
+
+# helper {{{
+
+# usage {{{
+sub print_usage {
+print <<"EOF";
+Image minapulation script -- ImageMagick wrapper
+
+usage: $prompt COMMAND OPTIONS
+
+   • COMMANDS
+       shadow        add shadow effects
+       trim          trim borders
+
+   • OPTIONS
+       -i --input    input file
+       -o --output   output file
+       -h --help     print this message
+
+   • example:
+       $prompt shadow -i input.png -o output.png
+
+EOF
+exit 0;
+}
+# }}}
+
+# command {{{
+sub command {
+    my $program = $_[0];
+    my $path = $ENV{"PATH"};
+    my @directories = split(":", $path);
+    my $found = '';
+    foreach my $dir (@directories) {
+        my $full_path = "$dir/$program";
+        if (-x $full_path) {
+            $found = $full_path;
+            last;
+        }
+    }
+    return $found;
+}
+
+my $runner;
+if (command("magick")) {
+    $runner = command("magick");
+} elsif (command("convert")) {
+    $runner = command("convert");
+} else {
+    print(STDERR "ImageMagick is not installed\n");
+    exit 1;
+}
+# }}}
+
+# exit code {{{
+sub check_exit_code {
+    my $exit_code = $_[0];
+    unless ($exit_code) {
+        print(color("bold green"), "success", color("reset"), "\n");
+    } else {
+        print(color("bold red"), "failed", color("reset"), "\n");
+    }
+}
+# }}}
+
+# logger {{{
+sub logger {
+    my ($name, $msg, $level) = @_;
+    $name =~ s,^im,,;
+    $level //= 1;
+    my ($package, $filename, $line) = caller();
+    my $current_length = $length - length($name) - 2;
+    my $blank = " "x$current_length;
+    my $current_date = strftime("%Y-%m-%d %H:%M:%S", localtime);
+
+    my $message = "$current_date ${prompt} ${package}::${name}$blank $line: $msg";
+
+    return if $level eq 0;
+    print($message) if $level eq 1;
+    print(STDERR $message) if $level ne 1;
+    exit $line if $level ge 3;
+}
+# }}}
+
+# prettry {{{
+sub pretty {
+    my ($name, $msg, $level) = @_;
+    $name =~ s,^im,,;
+    $level //= 5;
+    my ($package, $filename, $line) = caller();
+    my $current_length = $length - length($name) - 2;
+    my $blank = " "x$current_length;
+
+    my $logcolor;
+    $logcolor = "black" if $level eq 0;
+    $logcolor = "red" if $level eq 1;
+    $logcolor = "green" if $level eq 2;
+    $logcolor = "yellow" if $level eq 3;
+    $logcolor = "blue" if $level eq 4;
+    $logcolor = "magenta" if $level eq 5;
+    $logcolor = "cyan" if $level eq 6;
+    $logcolor = "white" if $level eq 7;
+
+    my $message = "";
+    $message = "\r$prompt ".color("bold $logcolor")."${package}::$name".$blank.color('reset')." $msg";
+
+    print(STDERR "$message");
+
+}
+# }}}
+
+# }}}
+
+# workers {{{
+
+# shadow {{{
+sub imshadow {
+    my $subname = (split(":", (caller(0))[3]))[-1];
+
+    # params {{{
+    my ($opts) = @_; # hashref
+    $opts ||= {};
+    my $input  = $opts->{input}        // '';
+    my $output = $opts->{output}       // '';
+    my %border = (
+        color => $opts->{border_color} // "none",
+        width => $opts->{border_width} // 0,
+    );
+    my %shadow = (
+        width => $opts->{shadow_width} // 110,
+        color => $opts->{shadow_color} // "black",
+        rate  => $opts->{shadow_rate}  // 10,
+        x     => $opts->{shadow_x}     // 1,
+        y     => $opts->{shadow_y}     // 1,
+    );
+    my $background_color = $opts->{background_color} // "none";
+    # }}}
+
+    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+    logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+    logger($subname, "No input image is specified\n", 3) unless defined $input;
+    logger($subname, "No output image is specified\n", 3) unless defined $output;
+
+    pretty("$subname", "$input > $output >> ");
+    my @exe = (
+        $runner,
+        $input,
+        "-bordercolor", $border{color},
+        "-border", $border{width},
+        '(',
+            "+clone",
+            "-background", ${background_color},
+            "-shadow", "$shadow{width}x$shadow{rate}+$shadow{x}+$shadow{y}",
+        ')',
+        "+swap",
+        "-background", "${background_color}",
+        "-layers", "merge", "+repage",
+        $output,
+    );
+
+    my $_exit_code = system(@exe);
+    my $exit_code = $_exit_code >> 8;
+    check_exit_code($exit_code);
+}
+# }}}
+
+# trim {{{
+sub imtrim {
+    my $subname = (split(":", (caller(0))[3]))[-1];
+
+    # params {{{
+    my ($opts) = @_; # hashref
+    $opts ||= {};
+    my $input  = $opts->{input}        // '';
+    my $output = $opts->{output}       // '';
+    # }}}
+
+    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+    logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+    logger($subname, "No input image is specified\n", 3) unless defined $input;
+    logger($subname, "No output image is specified\n", 3) unless defined $output;
+
+    pretty("$subname", "$input > $output >> ");
+    my @exe = (
+        $runner,
+        "-trim",
+        $input,
+        $output,
+    );
+
+    my $_exit_code = system(@exe);
+    my $exit_code = $_exit_code >> 8;
+    check_exit_code($exit_code);
+}
+# }}}
+
+# }}}
+
+# if ($help || !$cmd) {
+#     print_usage();
+# }
+
+# imshadow({input => $input, output => $output}) if $cmd eq "shadow";
+# imtrim({input => $input, output => $output}) if $cmd eq "trim";
+
+imshadow({input => $input, output => $output});
+imtrim({input => $output, output => $output});
+
+
