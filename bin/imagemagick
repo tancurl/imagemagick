@@ -9,7 +9,37 @@ use Cwd;
 use IO::Handle;
 use POSIX qw(strftime);
 use Term::ANSIColor;
+use Symbol;
 
+# }}}
+
+# get list of subroutines {{{
+my $filename = $0; # Replace with your script name
+open my $fh, '<', $filename or die "Cannot open $filename: $!";
+my @lines = <$fh>;
+close $fh;
+# Create a hash to store subroutine names
+my %subroutines;
+# Iterate through each line to find subroutine definitions
+foreach my $line (@lines) {
+    if ($line =~ /^\s*sub\s+(\w+)/) {
+        # $subroutines{$1} = 1;  # Store the subroutine name
+        if ($line =~ /^\s*sub\s+(im\w+)/) {
+            $subroutines{$1} = 1;  # Store the subroutine name
+        }
+    }
+}
+# Print the list of subroutines
+print "============\n";
+my @subs = ();
+for (keys %subroutines) {
+    my $_sub = $_;
+    $_sub =~ s/^im//;
+    push(@subs, $_sub);
+}
+foreach my $ss (@subs) {
+    print("$ss\n");
+}
 # }}}
 
 # variables {{{
@@ -32,12 +62,6 @@ my $cmd = shift @ARGV;
 # }}}
 
 # calculate blank space {{{
-my @subs = (
-    "imshadow",
-    "imtrim",
-    "imround"
-);
-
 my $length = 0;
 foreach my $func (@subs) {
     my $tl = length($func);
@@ -215,6 +239,40 @@ sub imshadow {
 }
 # }}}
 
+# alpha {{{
+sub imalpha {
+    my $subname = (split(":", (caller(0))[3]))[-1];
+
+    # params {{{
+    my ($opts) = @_; # hashref
+    $opts ||= {};
+    my $input  = $opts->{input}        // '';
+    my $output = $opts->{output}       // '';
+    my $color  = $opts->{color}       // 'white';
+    my $fuzz   = $opts->{fuzz}       // 99;
+    # }}}
+
+    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+    logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+    logger($subname, "No input image is specified\n", 3) unless defined $input;
+    logger($subname, "No output image is specified\n", 3) unless defined $output;
+
+    pretty("$subname", "$input > $output >> ");
+    my @exe = (
+        $runner,
+        "-transparent", $color,
+        "-fuzz", "$fuzz\%",
+        $input,
+        $output,
+    );
+
+    my $_exit_code = system(@exe);
+    my $exit_code = $_exit_code >> 8;
+    check_exit_code($exit_code);
+}
+# }}}
+
 # trim {{{
 sub imtrim {
     my $subname = (split(":", (caller(0))[3]))[-1];
@@ -246,6 +304,506 @@ sub imtrim {
 }
 # }}}
 
+# append {{{
+sub imappend {
+    my $subname = (split(":", (caller(0))[3]))[-1];
+
+    # params {{{
+    my ($opts) = @_; # hashref
+    $opts ||= {};
+    my $input    = $opts->{input}        // '';
+    my $output   = $opts->{output}       // '';
+    my $vertical = $opts->{vertical}     // '';
+    # }}}
+
+    my $append;
+    $append = "-append" if defined $vertical;
+    $append = "+append" unless defined $vertical;
+
+    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+    logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+    logger($subname, "No input image is specified\n", 3) unless defined $input;
+    logger($subname, "No output image is specified\n", 3) unless defined $output;
+
+    pretty("$subname", "$input > $output >> ");
+    my @exe = (
+        $runner,
+        $append,
+        $input,
+        $output,
+    );
+
+    my $_exit_code = system(@exe);
+    my $exit_code = $_exit_code >> 8;
+    check_exit_code($exit_code);
+}
+# }}}
+
+# blur {{{
+sub imblur {
+    my $subname = (split(":", (caller(0))[3]))[-1];
+
+    # params {{{
+    my ($opts) = @_; # hashref
+    $opts ||= {};
+    my $input  = $opts->{input}        // '';
+    my $output = $opts->{output}       // '';
+    my $blur   = $opts->{blur}         // 3;
+    my $rate   = $opts->{rate}         // 5;
+    my $scale  = $opts->{scale}        // 3;
+    # }}}
+
+    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+    logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+    logger($subname, "No input image is specified\n", 3) unless defined $input;
+    logger($subname, "No output image is specified\n", 3) unless defined $output;
+
+    pretty("$subname", "$input > $output >> ");
+    my $format = "\%[fx:w+((w+h)/${scale}*0.1)]x\%[fx:h+((w+h)/${scale}*0.1)]";
+    my $geo = `identify -format "$format" "${input}"`;
+
+    my @exe = (
+        $runner,
+        "-resize", "$blur\%",
+        $input,
+        "-gaussian-blur", "1x${rate}",
+        "-resize", "${geo}^",
+        "-extent", "${geo}",
+        $output,
+    );
+
+    my $_exit_code = system(@exe);
+    my $exit_code = $_exit_code >> 8;
+    check_exit_code($exit_code);
+}
+# }}}
+
+# crop {{{
+sub imcrop {
+    my $subname = (split(":", (caller(0))[3]))[-1];
+
+    # params {{{
+    my ($opts) = @_; # hashref
+    $opts ||= {};
+    my $input  = $opts->{input}        // '';
+    my $output = $opts->{output}       // '';
+    my $round  = $opts->{round}        // 25;
+    my $shape  = $opts->{shape}        // 'square';
+    # }}}
+
+    my $sqrp = $round;
+
+    my $x = `identify -format '\%w' ${input}`;
+    my $y = `identify -format '\%h' ${input}`;
+    my $xmid = $x // 2;
+    my $ymid = $y // 2;
+
+    print("dys: $x\n");
+    print("dys: $y\n");
+    print("dys: $xmid\n");
+    print("dys: $ymid\n");
+
+    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+    logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+    logger($subname, "No input image is specified\n", 3) unless defined $input;
+    logger($subname, "No output image is specified\n", 3) unless defined $output;
+
+    pretty("$subname", "$input > $output >> ");
+    my @exe;
+    if ($shape eq "circle") {
+        @exe = (
+            $runner,
+            $input,
+            "\(",
+                "+clone",
+                "-size", "${x}x${y}",
+                "-threshold", "100\%",
+                "-fill", "white",
+                "-draw", "roundrectangle 0,0 ${x},${y} ${xmid},${ymid}",
+            "\)",
+            "-alpha", "off",
+            "-compose", "CopyOpacity",
+            "-composite",
+            $output,
+        );
+    } else {
+        @exe = (
+            $runner,
+            $input,
+            "\(",
+                "+clone",
+                "-threshold", "100\%",
+                "-fill", "white",
+                "-draw", "roundrectangle 0,0 ${x},${y} ${sqrp},${sqrp}",
+            "\)",
+            "-alpha", "off",
+            "-compose", "CopyOpacity",
+            "-composite",
+            $output,
+        );
+    }
+
+    print(@exe, "\n");
+
+    my $_exit_code = system(@exe);
+    my $exit_code = $_exit_code >> 8;
+    check_exit_code($exit_code);
+}
+# }}}
+
+# color {{{
+sub imcolor {
+    my $subname = (split(":", (caller(0))[3]))[-1];
+
+    # params {{{
+    my ($opts) = @_; # hashref
+    $opts ||= {};
+    my $input   = $opts->{input}        // '';
+    my $output  = $opts->{output}       // '';
+    my $find    = $opts->{find}         // '';
+    my $replace = $opts->{replace}      // '';
+    my $percent = $opts->{percent}      // 55;
+    # }}}
+
+    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+    logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+    logger($subname, "No input image is specified\n", 3) unless defined $input;
+    logger($subname, "No output image is specified\n", 3) unless defined $output;
+    logger($subname, "No color is specified to find\n", 3) unless defined $find;
+    logger($subname, "No color is specified to replace\n", 3) unless defined $replace;
+
+    pretty("$subname", "$input > $output >> ");
+    my @exe = (
+        $runner,
+        $input,
+        "-fuzz",   "$percent\%",
+        "-fill",   "$find\%",
+        "-opaque", "$replace\%",
+        $output,
+    );
+
+    my $_exit_code = system(@exe);
+    my $exit_code = $_exit_code >> 8;
+    check_exit_code($exit_code);
+}
+# }}}
+
+# # trim {{{
+# sub imtrim {
+#     my $subname = (split(":", (caller(0))[3]))[-1];
+#
+#     # params {{{
+#     my ($opts) = @_; # hashref
+#     $opts ||= {};
+#     my $input  = $opts->{input}        // '';
+#     my $output = $opts->{output}       // '';
+#     # }}}
+#
+#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+#
+#     logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+#     logger($subname, "No input image is specified\n", 3) unless defined $input;
+#     logger($subname, "No output image is specified\n", 3) unless defined $output;
+#
+#     pretty("$subname", "$input > $output >> ");
+#     my @exe = (
+#         $runner,
+#         "-trim",
+#         $input,
+#         $output,
+#     );
+#
+#     my $_exit_code = system(@exe);
+#     my $exit_code = $_exit_code >> 8;
+#     check_exit_code($exit_code);
+# }
+# # }}}
+
+# # trim {{{
+# sub imtrim {
+#     my $subname = (split(":", (caller(0))[3]))[-1];
+#
+#     # params {{{
+#     my ($opts) = @_; # hashref
+#     $opts ||= {};
+#     my $input  = $opts->{input}        // '';
+#     my $output = $opts->{output}       // '';
+#     # }}}
+#
+#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+#
+#     logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+#     logger($subname, "No input image is specified\n", 3) unless defined $input;
+#     logger($subname, "No output image is specified\n", 3) unless defined $output;
+#
+#     pretty("$subname", "$input > $output >> ");
+#     my @exe = (
+#         $runner,
+#         "-trim",
+#         $input,
+#         $output,
+#     );
+#
+#     my $_exit_code = system(@exe);
+#     my $exit_code = $_exit_code >> 8;
+#     check_exit_code($exit_code);
+# }
+# # }}}
+
+# # trim {{{
+# sub imtrim {
+#     my $subname = (split(":", (caller(0))[3]))[-1];
+#
+#     # params {{{
+#     my ($opts) = @_; # hashref
+#     $opts ||= {};
+#     my $input  = $opts->{input}        // '';
+#     my $output = $opts->{output}       // '';
+#     # }}}
+#
+#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+#
+#     logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+#     logger($subname, "No input image is specified\n", 3) unless defined $input;
+#     logger($subname, "No output image is specified\n", 3) unless defined $output;
+#
+#     pretty("$subname", "$input > $output >> ");
+#     my @exe = (
+#         $runner,
+#         "-trim",
+#         $input,
+#         $output,
+#     );
+#
+#     my $_exit_code = system(@exe);
+#     my $exit_code = $_exit_code >> 8;
+#     check_exit_code($exit_code);
+# }
+# # }}}
+
+# # trim {{{
+# sub imtrim {
+#     my $subname = (split(":", (caller(0))[3]))[-1];
+#
+#     # params {{{
+#     my ($opts) = @_; # hashref
+#     $opts ||= {};
+#     my $input  = $opts->{input}        // '';
+#     my $output = $opts->{output}       // '';
+#     # }}}
+#
+#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+#
+#     logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+#     logger($subname, "No input image is specified\n", 3) unless defined $input;
+#     logger($subname, "No output image is specified\n", 3) unless defined $output;
+#
+#     pretty("$subname", "$input > $output >> ");
+#     my @exe = (
+#         $runner,
+#         "-trim",
+#         $input,
+#         $output,
+#     );
+#
+#     my $_exit_code = system(@exe);
+#     my $exit_code = $_exit_code >> 8;
+#     check_exit_code($exit_code);
+# }
+# # }}}
+
+# # trim {{{
+# sub imtrim {
+#     my $subname = (split(":", (caller(0))[3]))[-1];
+#
+#     # params {{{
+#     my ($opts) = @_; # hashref
+#     $opts ||= {};
+#     my $input  = $opts->{input}        // '';
+#     my $output = $opts->{output}       // '';
+#     # }}}
+#
+#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+#
+#     logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+#     logger($subname, "No input image is specified\n", 3) unless defined $input;
+#     logger($subname, "No output image is specified\n", 3) unless defined $output;
+#
+#     pretty("$subname", "$input > $output >> ");
+#     my @exe = (
+#         $runner,
+#         "-trim",
+#         $input,
+#         $output,
+#     );
+#
+#     my $_exit_code = system(@exe);
+#     my $exit_code = $_exit_code >> 8;
+#     check_exit_code($exit_code);
+# }
+# # }}}
+
+# # trim {{{
+# sub imtrim {
+#     my $subname = (split(":", (caller(0))[3]))[-1];
+#
+#     # params {{{
+#     my ($opts) = @_; # hashref
+#     $opts ||= {};
+#     my $input  = $opts->{input}        // '';
+#     my $output = $opts->{output}       // '';
+#     # }}}
+#
+#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+#
+#     logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+#     logger($subname, "No input image is specified\n", 3) unless defined $input;
+#     logger($subname, "No output image is specified\n", 3) unless defined $output;
+#
+#     pretty("$subname", "$input > $output >> ");
+#     my @exe = (
+#         $runner,
+#         "-trim",
+#         $input,
+#         $output,
+#     );
+#
+#     my $_exit_code = system(@exe);
+#     my $exit_code = $_exit_code >> 8;
+#     check_exit_code($exit_code);
+# }
+# # }}}
+
+# # trim {{{
+# sub imtrim {
+#     my $subname = (split(":", (caller(0))[3]))[-1];
+#
+#     # params {{{
+#     my ($opts) = @_; # hashref
+#     $opts ||= {};
+#     my $input  = $opts->{input}        // '';
+#     my $output = $opts->{output}       // '';
+#     # }}}
+#
+#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+#
+#     logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+#     logger($subname, "No input image is specified\n", 3) unless defined $input;
+#     logger($subname, "No output image is specified\n", 3) unless defined $output;
+#
+#     pretty("$subname", "$input > $output >> ");
+#     my @exe = (
+#         $runner,
+#         "-trim",
+#         $input,
+#         $output,
+#     );
+#
+#     my $_exit_code = system(@exe);
+#     my $exit_code = $_exit_code >> 8;
+#     check_exit_code($exit_code);
+# }
+# # }}}
+
+# # trim {{{
+# sub imtrim {
+#     my $subname = (split(":", (caller(0))[3]))[-1];
+#
+#     # params {{{
+#     my ($opts) = @_; # hashref
+#     $opts ||= {};
+#     my $input  = $opts->{input}        // '';
+#     my $output = $opts->{output}       // '';
+#     # }}}
+#
+#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+#
+#     logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+#     logger($subname, "No input image is specified\n", 3) unless defined $input;
+#     logger($subname, "No output image is specified\n", 3) unless defined $output;
+#
+#     pretty("$subname", "$input > $output >> ");
+#     my @exe = (
+#         $runner,
+#         "-trim",
+#         $input,
+#         $output,
+#     );
+#
+#     my $_exit_code = system(@exe);
+#     my $exit_code = $_exit_code >> 8;
+#     check_exit_code($exit_code);
+# }
+# # }}}
+
+# # trim {{{
+# sub imtrim {
+#     my $subname = (split(":", (caller(0))[3]))[-1];
+#
+#     # params {{{
+#     my ($opts) = @_; # hashref
+#     $opts ||= {};
+#     my $input  = $opts->{input}        // '';
+#     my $output = $opts->{output}       // '';
+#     # }}}
+#
+#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+#
+#     logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+#     logger($subname, "No input image is specified\n", 3) unless defined $input;
+#     logger($subname, "No output image is specified\n", 3) unless defined $output;
+#
+#     pretty("$subname", "$input > $output >> ");
+#     my @exe = (
+#         $runner,
+#         "-trim",
+#         $input,
+#         $output,
+#     );
+#
+#     my $_exit_code = system(@exe);
+#     my $exit_code = $_exit_code >> 8;
+#     check_exit_code($exit_code);
+# }
+# # }}}
+
+# # trim {{{
+# sub imtrim {
+#     my $subname = (split(":", (caller(0))[3]))[-1];
+#
+#     # params {{{
+#     my ($opts) = @_; # hashref
+#     $opts ||= {};
+#     my $input  = $opts->{input}        // '';
+#     my $output = $opts->{output}       // '';
+#     # }}}
+#
+#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+#
+#     logger($subname, "Input: No such file or directory\n", 3) unless -f $input;
+#     logger($subname, "No input image is specified\n", 3) unless defined $input;
+#     logger($subname, "No output image is specified\n", 3) unless defined $output;
+#
+#     pretty("$subname", "$input > $output >> ");
+#     my @exe = (
+#         $runner,
+#         "-trim",
+#         $input,
+#         $output,
+#     );
+#
+#     my $_exit_code = system(@exe);
+#     my $exit_code = $_exit_code >> 8;
+#     check_exit_code($exit_code);
+# }
+# # }}}
+
+# }}}
+
 # }}}
 
 # if ($help || !$cmd) {
@@ -255,7 +813,13 @@ sub imtrim {
 # imshadow({input => $input, output => $output}) if $cmd eq "shadow";
 # imtrim({input => $input, output => $output}) if $cmd eq "trim";
 
-imshadow({input => $input, output => $output});
-imtrim({input => $output, output => $output});
+# imshadow({input => $input, output => $output});
+# imtrim({input => $output, output => $output});
+
+
+imcrop({input => $input, output => $output, shape => "circle"}) if $cmd eq "circle";
+imcrop({input => $input, output => $output, shape => "square"}) if $cmd eq "square";
+# imsquare({input => $input, output => $output}) if $cmd eq "square";
+
 
 
