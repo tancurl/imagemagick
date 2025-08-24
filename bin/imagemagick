@@ -12,7 +12,7 @@ use IO::Handle;
 use POSIX qw(strftime);
 use Term::ANSIColor;
 use Symbol;
-use POSIX qw(_exit);
+use Time::HiRes qw(sleep);
 $| = 1;  # autoflush
 # }}}
 
@@ -194,12 +194,33 @@ if ($found_im) {
 }
 # }}}
 
+# clean {{{
+sub clean {
+    # my $clean = "\b\b\b\b    ";
+    # print(STREAM $clean);
+
+    my $repeat = 1;
+    my @spinner = ('|', '/', '-', '\\');
+    my $duration = shift;  # Duration to display the spinner
+    my $end_time = time() + $repeat;
+
+    while (time() < $end_time) {
+        for my $char (@spinner) {
+            print STREAM "\r";
+            print STREAM $char;
+            sleep(0.1);
+            print STREAM "\b ";
+        }
+    }
+}
+# }}}
+
 # exit code {{{
 sub check_exit_code {
     my ($package, $filename, $line) = caller();
     my $exit_code = $_[0];
     my $fail = 'fail';  # ×
-    my $done = 'done';  # ✓
+    my $done = "done";  # ✓
     my $side = "fg";
     $fail = "$fail" if $side eq "fg";
     $done = "$done" if $side eq "fg";
@@ -222,7 +243,6 @@ sub check_exit_code {
         exit $line;
     } else {
         $msg = color($color{$side}{done}).$done.color("reset");
-        # exit 0;
     }
     return $msg;
 }
@@ -275,7 +295,7 @@ sub pretty {
 
     $message = "$prompt ".color("bold $logcolor")."$name".color('reset').$blank;
 
-    print(STREAM "\r$message");
+    print(STREAM "\r  $message");
 
     # print(STREAM "\033[K");  # clear the line
     # print(STREAM "\r");
@@ -292,7 +312,7 @@ sub get_syntax {
     open(my $fh, '<', $filename) or die "Could not open file '$filename' $!";
     my $first_line = <$fh>;
     $shebang = $first_line if $first_line =~ /^#!/;
-    chomp($shebang);
+    chomp($shebang) if $shebang;
     close($fh);
     my $language;
     if ($shebang) {
@@ -709,16 +729,6 @@ sub imgradient {
     my $resolution_x = `$identify -format '%w' $input[0]` + $border{rate};
     my $resolution_y = `$identify -format '%h' $input[0]` + $border{rate};
 
-    # print(STREAM "resolution: $resolution\n");
-    # print(STREAM "resolution_x: $resolution_x\n");
-    # print(STREAM "resolution_y: $resolution_y\n");
-    # foreach my $ent (@input) {
-    #     print("input: $ent\n");
-    # }
-    # exit 0;
-
-# "gradient:$color{first}-$color{second}"
-
     ($color{first}, $color{second}) = ($color{second}, $color{first}) if $mirror;
 
     my $rotation = $rotate * 45;
@@ -772,9 +782,18 @@ sub imgradient {
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 
-    # imshadow({input => $input[0], output => $output, shadow_rate => 45, shadow_width => 80, background_color => 'none'});
-    imshadow({input => $input[0], output => $output, shadow_rate => 45, shadow_width => 80, background_color => 'none'}) if $shadow{apply};
+    if ($shadow{apply}) {
+        imshadow({
+            input => $input[0],
+            output => $output,
+            shadow_rate => 45,
+            shadow_width => 80,
+            background_color => 'none'
+        });
+        clean();
+    }
     immerge({input => "${output},$tmpfile", output => $output});
+    clean();
 
     pretty($subname, "remove $tmpdir ");
     remove_tree($tmpdir, {error => \my $err});
@@ -997,6 +1016,7 @@ sub imtitle {
     logger($subname, "missing file: $tmpfile_title_bar\n", 3) unless -f $tmpfile_title_bar;
 
     imappend({input => "$tmpfile_title_button,$input[0]", output => $output});
+    clean();
 
     pretty($subname, "remove $tmpdir ");
     remove_tree($tmpdir, {error => \my $err});
@@ -1199,6 +1219,7 @@ sub imsrc {
 
     # extra filters and visual effects
     imtrim({input => $tmpfile_image, output => $output});
+    clean();
     imshadow({
         input => $output,
         output => $output,
@@ -1208,38 +1229,53 @@ sub imsrc {
         border_color => '#151515',
         background_color => 'none',
     });
+    clean();
     imtrim({input => $output, output => $output});
+    clean();
     imtitle({input => $output, output => $output, frame_title => $frame{title}, background_color => $color{background}});
+    clean();
     imround({input => $output, output => $output, round => $round});
+    clean();
     imextend({input => $output, output => $output, rate => 2});
+    clean();
     imround({input => $output, output => $output, round => $round});
-    imshadow({
-        input => $output,
-        output => $output,
-        shadow_width => $shadow{width},
-        shadow_rate  => $shadow{rate},
-        shadow_color => $shadow{color},
-        border_width => 10,
-    }) if $alpha{apply};
-    imshadow({
-        input => $output,
-        output => $output,
-        shadow_width => $shadow{width},
-        shadow_rate  => $shadow{rate} * 10,
-        shadow_color => $shadow{color},
-        border_width => 10,
-    }) if $shadow{apply};
-    imgradient({
-        input => $output,
-        output => $output,
-        color_gradient_first => "",
-        color_gradient_second => "",
-        gradient_width => "",
-        gradient_height => "",
-        mirror => $gradient{mirror},
-        rotate => $gradient{rotate},
-        orientation => $gradient{orientation},
-    }) if $gradient{apply};
+    clean();
+    if ($shadow{apply}) {
+        imshadow({
+            input => $output,
+            output => $output,
+            shadow_width => $shadow{width},
+            shadow_rate  => $shadow{rate},
+            shadow_color => $shadow{color},
+            border_width => 10,
+        });
+        clean();
+    }
+    if ($shadow{apply}) {
+        imshadow({
+            input => $output,
+            output => $output,
+            shadow_width => $shadow{width},
+            shadow_rate  => $shadow{rate} * 10,
+            shadow_color => $shadow{color},
+            border_width => 10,
+        });
+        clean();
+    }
+    if ($gradient{apply}) {
+        imgradient({
+            input => $output,
+            output => $output,
+            color_gradient_first => "",
+            color_gradient_second => "",
+            gradient_width => "",
+            gradient_height => "",
+            mirror => $gradient{mirror},
+            rotate => $gradient{rotate},
+            orientation => $gradient{orientation},
+        });
+        clean();
+    }
 
     # clean up the mess
     pretty($subname, "remove $tmpdir ");
@@ -1257,6 +1293,67 @@ sub imsrc {
     # frag out!
     pretty("$subname", "$tmpfile_pango > $output ");
     print(STREAM check_exit_code($exit_code));
+}
+# }}}
+
+# palette {{{
+sub impalette {
+    my $subname = (split(":", (caller(0))[3]))[-1];
+
+    # params {{{
+    my ($opts) = @_; # hashref
+    $opts ||= {};
+    my $inputs = $opts->{input}   // '';
+    my $number = $opts->{number}  // 16;
+    my $space  = $opts->{space}   // 'LAB';
+    my $type   = $opts->{type}    // 'hex';
+    my $alpha  = $opts->{alpha}   // 1;
+    # }}}
+
+    my @input = split(",", $inputs);
+
+    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+    logger($subname, "No input image is specified\n", 3) unless defined $input[0];
+
+    pretty("$subname", "$input[0] ");
+    my @exe = (
+        $runner,
+        $input[0],
+        "-format", '%c',
+        "-colorspace", $space,
+        "-colors", $number,
+        "histogram:info:-",
+    );
+
+    my $tmp_output = `@exe`;
+    my $exit_code = $? >> 8;
+    chomp($tmp_output) if $tmp_output;
+
+    my @palette;
+    my @_output = split("\n", $tmp_output);
+    foreach my $line (@_output) {
+        my $color;
+        my ($id, $kernel, $hex, $rgb) = split(" ", $line);
+        if ($alpha) {
+            # no alpha channel
+            $hex =~ s/(.{6})..$/$1/;
+            $rgb =~ s/(.*)\((.*),(.*),(.*),(.*)\)$/$1($2,$3,$4)/;
+
+            # # also return the alpha channel
+            # $hex =~ s/(.{7})(.{2})$/hex:$1 alpha:$2/;
+            # $rgb =~ s/(.*)\((.*),(.*),(.*),(.*)\)$/$1($2,$3,$4) a($5)/;
+        }
+        $color = $hex if $type eq 'hex';
+        $color = $rgb if $type eq 'rgb';
+        $color = "$hex $rgb" if $type eq 'all';
+        push(@palette, $color) if $color;
+    }
+
+    print(STREAM check_exit_code($exit_code));
+
+    return $output;
 }
 # }}}
 
@@ -1359,46 +1456,11 @@ sub imsrc {
 # }
 # # }}}
 
-# # trim {{{
-# sub imtrim {
-#     my $subname = (split(":", (caller(0))[3]))[-1];
-#
-#     # params {{{
-#     my ($opts) = @_; # hashref
-#     $opts ||= {};
-#     my $inputs = $opts->{input}        // '';
-#     my $output = $opts->{output}       // '';
-#     # }}}
-#
-#     my @input = split(",", $inputs);
-#
-#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-#
-#     logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-#     logger($subname, "No input image is specified\n", 3) unless defined $input[0];
-#     logger($subname, "No output image is specified\n", 3) unless defined $output;
-#
-#     pretty("$subname", "$input[0] > $output ");
-#     my @exe = (
-#         $runner,
-#         "-trim",
-#         $input[0],
-#         $output,
-#     );
-#
-#     my $_exit_code = system(@exe);
-#     my $exit_code = $_exit_code >> 8;
-#     print(STREAM check_exit_code($exit_code));
-# }
-# # }}}
-
 # }}}
 
-# }}}
-
-# if ($help || !$cmd) {
-#     print_usage();
-# }
+if ($help || !$cmd) {
+    print_usage();
+}
 
 print(STREAM "] $date $prompt $cmd\n");
 
@@ -1426,8 +1488,10 @@ if ($cmd eq "src") {
     });
 }
 
+impalette({input => @input, type => 'hex'}) if $cmd eq "palette";
+
 # imcrop({input => join(",", @input), output => $output, shape => "circle"}) if $cmd eq "gradient";
 # imcrop({input => join(",", @input), output => $output, shape => "square"}) if $cmd eq "gradient";
 
-
 print("\n");
+
