@@ -65,10 +65,11 @@ my %default = (
         frame      => '#2c2c2c',
     },
     font => {
-        sans => 'Ubuntu-Bold',
-        mono => 'Noto-Sans-Mono',
+        sans  => 'Ubuntu-Bold',
+        serif => 'FreeSerif',
+        mono  => 'Noto-Sans-Mono',
+        size  => 22,
     },
-    size => 22,
 );
 # }}}
 
@@ -94,11 +95,11 @@ my $cmd = shift @ARGV;
 # }}}
 
 # calculate blank space {{{
-my $length = 0;
+my $height = 0;
 foreach my $func (@subs) {
     my $tl = length($func);
-    if ($tl gt $length) {
-        $length = $tl;
+    if ($tl gt $height) {
+        $height = $tl;
     }
 }
 # }}}
@@ -256,7 +257,7 @@ sub logger {
     my ($package, $filename, $line) = caller();
     my $current_date = strftime("%Y-%m-%d %H:%M:%S", localtime);
 
-    my $message = "] $current_date ${prompt} ${package}::${name}::${line} | $msg";
+    my $message = "] $current_date ${prompt} ${package}::${name}   >>> ${line} | $msg";
 
     return if $level == 0;
     print($message) if $level == 1;
@@ -275,7 +276,7 @@ sub pretty {
     my ($package, $filename, $line) = caller();
 
     # left padding
-    my $current_length = $length - length($name) + 1;
+    my $current_length = $height - length($name) + 1;
     my $blank = " "x$current_length;
 
     my $logcolor;
@@ -330,6 +331,57 @@ sub get_syntax {
 # }}}
 
 # workers {{{
+
+# resize {{{
+sub imresize {
+    my $subname = (split(":", (caller(0))[3]))[-1];
+
+    # params {{{
+    my ($opts) = @_; # hashref
+    $opts ||= {};
+    my $inputs = $opts->{input}        // '';
+    my $output = $opts->{output}       // '';
+    my %resolution = (
+        a => $opts->{resolution_a}     // '',
+        x => $opts->{resolution_x}     // '',
+        y => $opts->{resolution_y}     // '',
+    );
+    # }}}
+
+    my @input = split(",", $inputs);
+
+    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+    logger($subname, "No input image is specified\n", 3) unless $input[0];
+    logger($subname, "No output image is specified\n", 3) unless $output;
+    logger($subname, "No resolution is specified\n", 3) unless $resolution{a};
+    unless ($resolution{x}) {
+        $resolution{x} =~ s/x.*//;
+        logger($subname, "No x resolution\n", 2)
+    }
+    unless ($resolution{y}) {
+        $resolution{y} =~ s/.*x//;
+        logger($subname, "No y resolution\n", 2);
+    }
+
+    pretty("$subname", "$input[0] > $output ");
+    my @exe = (
+        $runner,
+            "-resize", "$resolution{a}^",
+            $input[0],
+            "-background", "none",
+            "-gravity", "center",
+            "-extent", "$resolution{a}^",
+        $output,
+    );
+
+    my $_exit_code = system(@exe);
+    my $exit_code = $_exit_code >> 8;
+    print(STREAM check_exit_code($exit_code));
+
+}
+# }}}
 
 # shadow {{{
 sub imshadow {
@@ -651,7 +703,6 @@ sub immerge {
     my $inputs = $opts->{input}        // '';
     my $output = $opts->{output}       // '';
     my $fade   = $opts->{fade}         // '';
-    my @fader = ("-blend", "$fade") if $fade;
     # }}}
 
     my @input = split(",", $inputs);
@@ -661,6 +712,8 @@ sub immerge {
     logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
     logger($subname, "No input image is specified\n", 3) unless $input[0];
     logger($subname, "No output image is specified\n", 3) unless $output;
+
+    my @fader = ("-blend", "$fade") if $fade;
 
     pretty("$subname", "@input > $output ");
     my @exe = (
@@ -938,7 +991,7 @@ sub imtitle {
 	my $title    = $opts->{title}    // 'Source Code';;
     my $font     = $opts->{font}     // $default{font}{sans};;
     my $vertical = $opts->{vertical} // '-0';;
-    my $size     = $opts->{size}     // $default{size};;
+    my $size     = $opts->{size}     // $default{font}{size};;
     my %color = (
         background => $opts->{color_background} // $default{color}{background},
         temperory  => $opts->{color_temperory}  // $default{color}{temperory},
@@ -1118,7 +1171,7 @@ sub imsrc {
     my $theme      = $opts->{theme}      // 'gruvbox-dark';
     my %font = (
         name => $opts->{font_name} // $default{font}{mono},
-        size => $opts->{font_size} // $default{size},
+        size => $opts->{font_size} // $default{font}{size},
     );
     my %frame = (
         title => $opts->{frame_title} // 'Source Code',
@@ -1357,38 +1410,142 @@ sub impalette {
 }
 # }}}
 
-# # trim {{{
-# sub imtrim {
-#     my $subname = (split(":", (caller(0))[3]))[-1];
-#
-#     # params {{{
-#     my ($opts) = @_; # hashref
-#     $opts ||= {};
-#     my $inputs = $opts->{input}        // '';
-#     my $output = $opts->{output}       // '';
-#     # }}}
-#
-#     my @input = split(",", $inputs);
-#
-#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-#
-#     logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-#     logger($subname, "No input image is specified\n", 3) unless defined $input[0];
-#     logger($subname, "No output image is specified\n", 3) unless defined $output;
-#
-#     pretty("$subname", "$input[0] > $output ");
-#     my @exe = (
-#         $runner,
-#         "-trim",
-#         $input[0],
-#         $output,
-#     );
-#
-#     my $_exit_code = system(@exe);
-#     my $exit_code = $_exit_code >> 8;
-#     print(STREAM check_exit_code($exit_code));
-# }
-# # }}}
+# string {{{
+sub imstring {
+    my $subname = (split(":", (caller(0))[3]))[-1];
+
+    # params {{{
+    my ($opts) = @_; # hashref
+    $opts ||= {};
+    my $inputs = $opts->{input}   // 'null';
+    my $output = $opts->{output}  // '';
+    my $text   = $opts->{text}    // '';
+    my $scale  = $opts->{scale}   // 1;
+    my $width  = $opts->{width}   // 800;
+    my $height = $opts->{height}  // 600;
+    my $ltr    = $opts->{ltr}     // 'caption';  # pango
+    my %font = (
+        name => $opts->{font}     // $default{font}{serif},
+        size => $opts->{size}     // 0,
+    );
+    my %gap = (
+        i => $opts->{gap_i}    // 1,
+        x => $opts->{gap_x}    // 0,
+        y => $opts->{gap_y}    // 0,
+    );
+    my %color  = (
+        foreground => $opts->{color_foreground}  // 'black',
+        background => $opts->{color_background}  // 'white',
+    );
+    # }}}
+
+    logger($subname, "text is not specified\n", 3) unless $text;
+    logger($subname, "output image is not specified\n", 3) unless $output;
+
+    my @input;
+    my $merge = 0;
+    my $generate = 0;
+
+    if ($inputs && $inputs ne 'null') {
+        @input = split(",", $inputs);
+        $merge = 1;
+    } else {
+        logger($subname, "input is not specified\n", 2);
+        $generate = 1;
+    }
+
+    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+    my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
+    my $tmpfile_text = "$tmpdir/imagemagick-tmp-text.png";
+    my $tmpfile_image = "$tmpdir/imagemagick-tmp-image.png";
+
+    if ($merge) {
+        make_path($tmpdir);
+        $generate = 0;
+    }
+    if ($generate) {
+        logger($subname, "missing input file, an empty image will be generated\n", 2);
+        $tmpfile_text = $output;
+        $input[0] = $output;
+        $merge = 0;
+    }
+
+    print("width: $width\n");
+    print("height: $height\n");
+    if ($merge) {
+        my %resolution = (
+            a => `$identify -format '%wx%h' $input[0]`,
+            x => `$identify -format '%w' $input[0]`,
+            y => `$identify -format '%h' $input[0]`,
+        );
+        $width = $resolution{x} / $scale;
+        $height = $resolution{y} / $scale;
+    }
+    print("width: $width\n");
+    print("height: $height\n");
+    # exit 0;
+
+    my $resolution = "${width}x$height";
+    my $inner_gap;
+    my $inner_width;
+    my $inner_height;
+    my $inner_resolution = $resolution;
+    if ($gap{i}) {
+        $inner_gap        = $gap{i} * 100;
+        $inner_width      = $width - $inner_gap;
+        $inner_height     = $height - $inner_gap;
+        $inner_resolution = "${inner_width}x$inner_height";
+    }
+
+    pretty("$subname", "$input[0] > $output ");
+    if ($merge) {
+        $color{background} = 'none';
+    }
+    my @exe = (
+        $runner,
+            "-gravity", "West",
+            "-background", $color{background},
+            "-fill", $color{foreground},
+            "-size", $inner_resolution,
+            "-font", $font{name},
+    );
+    push(@exe, ("-pointsize", $font{size})) if $font{size};
+    push(@exe, (
+        "${ltr}:$text",
+        "-background", $color{background},
+        "-gravity", "Center",
+        "-extent", $resolution,
+        $tmpfile_text
+    ));
+    my $_exit_code = system(@exe);
+
+    if ($merge) {
+        # imtrim({input => $tmpfile_text, output => $tmpfile_text});
+        # clean();
+
+        imresize({input => $tmpfile_text, output => $tmpfile_text, resolution_a => $resolution});
+        clean();
+
+        immerge({input => "$tmpfile_text,$input[0]", output => $output});
+        clean();
+    }
+
+    pretty($subname, "remove $tmpdir ");
+    remove_tree($tmpdir, {error => \my $err});
+    if (@$err) {
+        foreach my $diag (@$err) {
+            print(STREAM check_exit_code($?));
+            logger($subname, "Failed to remove $diag->[0]: $diag->[1]\n", 2);
+        }
+    } else {
+        print(STREAM check_exit_code($?));
+    }
+
+    pretty("$subname", "$input[0] > $output ");
+    my $exit_code = $_exit_code >> 8;
+    print(STREAM check_exit_code($exit_code));
+}
+# }}}
 
 # # trim {{{
 # sub imtrim {
@@ -1488,7 +1645,14 @@ if ($cmd eq "src") {
     });
 }
 
-impalette({input => @input, type => 'hex'}) if $cmd eq "palette";
+if ($cmd eq "palette") {
+    impalette({input => @input, type => 'hex'});
+}
+
+if ($cmd eq "string") {
+    @input = ('null') unless @input;
+    imstring({input => @input, output => $output, text => "Simple Test!"});
+}
 
 # imcrop({input => join(",", @input), output => $output, shape => "circle"}) if $cmd eq "gradient";
 # imcrop({input => join(",", @input), output => $output, shape => "square"}) if $cmd eq "gradient";
