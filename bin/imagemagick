@@ -42,15 +42,13 @@ foreach my $line (@lines) {
     }
 }
 # Print the list of subroutines
-my @subs = ();
+my @subs_unsort = ();
 for (keys %subroutines) {
     my $_sub = $_;
     $_sub =~ s/^im//;
-    push(@subs, $_sub);
+    push(@subs_unsort, $_sub);
 }
-# foreach my $ss (@subs) {
-#     print("$ss\n");
-# }
+my @subs = sort @subs_unsort;
 # }}}
 
 # variables {{{
@@ -126,24 +124,177 @@ foreach my $func (@subs) {
 
 # usage {{{
 sub print_usage {
-print <<"EOF";
+my $command = $_[0];
+
+# messages {{{
+
+# main {{{
+my $main = <<"EOF";
 Image minapulation script -- ImageMagick wrapper
 
 usage: $prompt COMMAND OPTIONS
 
-   • COMMANDS
+   • COMMAND
+       alpha         make an image transparent -- fade
+       append        append images vertically or horizontally
+       blur          add blur effect to image
+       color         find and replace a color in image
+       crop          crop image
+       extend        extend image border
+       gradient      add gradient background to image
+       merge         marge two images (put one on top of another)
+       negate        reverse image's color
+       palette       generate hex/rgb color palette from the image
+       resize        resize the image
+       round         round the image's corners
        shadow        add shadow effects
+       shot          # WIP -- take screenshot from desktop / window
+       src           generate image from a src file with syntax highlight
+       string        add string to an image -- or generate one
+       title         add window (application) like frame to the image
        trim          trim borders
 
-   • OPTIONS
-       -i --input    input file
-       -o --output   output file
-       -h --help     print this message
+   • OPTION
+       try help page of each command
 
    • example:
        $prompt shadow -i input.png -o output.png
 
 EOF
+# }}}
+
+# alpha {{{
+my $alpha = <<"EOF";
+
+EOF
+# }}}
+
+# append {{{
+my $append = <<"EOF";
+
+EOF
+# }}}
+
+# blur {{{
+my $blur = <<"EOF";
+
+EOF
+# }}}
+
+# color {{{
+my $color = <<"EOF";
+
+EOF
+# }}}
+
+# crop {{{
+my $crop = <<"EOF";
+
+EOF
+# }}}
+
+# extend {{{
+my $extend = <<"EOF";
+
+EOF
+# }}}
+
+# gradient {{{
+my $gradient = <<"EOF";
+
+EOF
+# }}}
+
+# merge {{{
+my $merge = <<"EOF";
+
+EOF
+# }}}
+
+# negate {{{
+my $negate = <<"EOF";
+
+EOF
+# }}}
+
+# palette {{{
+my $palette = <<"EOF";
+
+EOF
+# }}}
+
+# resize {{{
+my $resize = <<"EOF";
+
+EOF
+# }}}
+
+# round {{{
+my $round = <<"EOF";
+
+EOF
+# }}}
+
+# shadow {{{
+my $shadow = <<"EOF";
+
+EOF
+# }}}
+
+# shot {{{
+my $shot = <<"EOF";
+
+EOF
+# }}}
+
+# src {{{
+my $src = <<"EOF";
+
+EOF
+# }}}
+
+# string {{{
+my $string = <<"EOF";
+
+EOF
+# }}}
+
+# title {{{
+my $title = <<"EOF";
+
+EOF
+# }}}
+
+# trim {{{
+my $trim = <<"EOF";
+
+EOF
+# }}}
+
+# }}}
+
+# args {{{
+print(STREAM $alpha)    if $command eq "alpha";
+print(STREAM $append)   if $command eq "append";
+print(STREAM $blur)     if $command eq "blur";
+print(STREAM $color)    if $command eq "color";
+print(STREAM $crop)     if $command eq "crop";
+print(STREAM $extend)   if $command eq "extend";
+print(STREAM $gradient) if $command eq "gradient";
+print(STREAM $merge)    if $command eq "merge";
+print(STREAM $negate)   if $command eq "negate";
+print(STREAM $palette)  if $command eq "palette";
+print(STREAM $resize)   if $command eq "resize";
+print(STREAM $round)    if $command eq "round";
+print(STREAM $shadow)   if $command eq "shadow";
+print(STREAM $shot)     if $command eq "shot";
+print(STREAM $src)      if $command eq "src";
+print(STREAM $string)   if $command eq "string";
+print(STREAM $title)    if $command eq "title";
+print(STREAM $trim)     if $command eq "trim";
+print(STREAM $main)     unless $command;
+# }}}
+
 exit 0;
 }
 # }}}
@@ -441,10 +592,10 @@ sub imalpha {
     # params {{{
     my ($opts) = @_; # hashref
     $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output = $opts->{output}       // '';
-    my $color  = $opts->{color}       // 'white';
-    my $fuzz   = $opts->{fuzz}       // 99;
+    my $inputs = $opts->{input}    // '';
+    my $output = $opts->{output}   // '';
+    my $color  = $opts->{color}    // 'white';
+    my $fuzz   = $opts->{fuzz}     // 99;
     # }}}
 
     my @input = split(",", $inputs);
@@ -510,16 +661,29 @@ sub imappend {
     # params {{{
     my ($opts) = @_; # hashref
     $opts ||= {};
-    my $inputs   = $opts->{input}        // '';
-    my $output   = $opts->{output}       // '';
-    my $vertical = $opts->{vertical}     // '';
+    my $inputs     = $opts->{input}        // '';
+    my $output     = $opts->{output}       // '';
+    my $vertical   = $opts->{vertical}     // 1;
+    my $horizontal = $opts->{horizontal}   // 0;
     # }}}
 
     my @input = split(",", $inputs);
 
     my $append;
-    $append = "+append" if $vertical;
-    $append = "-append" unless $vertical;
+    if ($horizontal) {
+        $append = "+append";
+        $vertical = 0;
+    }
+    if ($vertical) {
+        $append = "-append";
+        $horizontal = 0;
+    }
+
+    # what would you want me to say here!?
+    if ($vertical && $horizontal) {
+        logger($subname, "What? vertical AND horizontal append?! make up your mind!\n", 2);
+        logger($subname, "btw, How on earth did you manage to trigger this?! I ~~have~~ had a fail safe!\n", 3);
+    }
 
     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
 
@@ -1068,7 +1232,7 @@ sub imtitle {
     logger($subname, "missing file: $tmpfile_title_button\n", 3) unless -f $tmpfile_title_button;
     logger($subname, "missing file: $tmpfile_title_bar\n", 3) unless -f $tmpfile_title_bar;
 
-    imappend({input => "$tmpfile_title_button,$input[0]", output => $output});
+    imappend({input => "$tmpfile_title_button,$input[0]", output => $output, vertical => 1, horizontal => 1});
     clean();
 
     pretty($subname, "remove $tmpdir ");
@@ -1615,11 +1779,18 @@ sub imstring {
 
 # }}}
 
-if ($help || !$cmd) {
+if ($help || !$cmd || $cmd eq "help") {
     print_usage();
 }
 
 print(STREAM "] $date $prompt $cmd\n");
+
+if ($cmd eq "list") {
+    print(STREAM "] List of valid commands:\n");
+    foreach my $ss (@subs) {
+        print(STREAM "    $ss\n");
+    }
+}
 
 # imshadow({input => join(",", @input), output => $output}) if $cmd eq "shadow";
 # imtrim({input => join(",", @input), output => $output}) if $cmd eq "trim";
@@ -1645,14 +1816,14 @@ if ($cmd eq "src") {
     });
 }
 
-if ($cmd eq "palette") {
-    impalette({input => @input, type => 'hex'});
-}
+# if ($cmd eq "palette") {
+#     impalette({input => @input, type => 'hex'});
+# }
 
-if ($cmd eq "string") {
-    @input = ('null') unless @input;
-    imstring({input => @input, output => $output, text => "Simple Test!"});
-}
+# if ($cmd eq "string") {
+#     @input = ('null') unless @input;
+#     imstring({input => @input, output => $output, text => "Simple Test!"});
+# }
 
 # imcrop({input => join(",", @input), output => $output, shape => "circle"}) if $cmd eq "gradient";
 # imcrop({input => join(",", @input), output => $output, shape => "square"}) if $cmd eq "gradient";
