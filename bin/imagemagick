@@ -360,7 +360,7 @@ sub clean {
         for my $char (@spinner) {
             print STREAM "\r";
             print STREAM $char;
-            sleep(0.1);
+            sleep(0.06);
             print STREAM "\b ";
         }
     }
@@ -447,7 +447,7 @@ sub pretty {
 
     $message = "$prompt ".color("bold $logcolor")."$name".color('reset').$blank;
 
-    print(STREAM "\r  $message");
+    print(STREAM "\r  $message ");
 
     # print(STREAM "\033[K");  # clear the line
     # print(STREAM "\r");
@@ -914,7 +914,8 @@ sub imgradient {
         background  => $opts->{color_background}  // 'none',
     );
     my %shadow = (
-        apply  => $opts->{shadow_apply}  // 0,
+        apply  => $opts->{shadow_apply}  // 1,
+        double => $opts->{shadow_double} // 0,
         color  => $opts->{shadow_color}  // 'black',
         width  => $opts->{shadow_width}  // 110,
         rate   => $opts->{shadow_rate}   // 10,
@@ -948,7 +949,7 @@ sub imgradient {
 
     ($color{first}, $color{second}) = ($color{second}, $color{first}) if $mirror;
 
-    my $rotation = $rotate * 45;
+    my $rotation = $rotate;
 
     my $gradient_orientation;
     $gradient_orientation = "gradient:$color{first}-$color{second}" if $orientation eq "vertical";
@@ -1003,11 +1004,21 @@ sub imgradient {
         imshadow({
             input => $input[0],
             output => $output,
-            shadow_rate => 45,
-            shadow_width => 80,
+            shadow_rate => 5,
+            shadow_width => 20,
             background_color => 'none'
         });
         clean();
+        if ($shadow{double}) {
+            imshadow({
+                input => $output,
+                output => $output,
+                shadow_rate => 5,
+                shadow_width => 20,
+                background_color => 'none'
+            });
+            clean();
+        }
     }
     immerge({input => "${output},$tmpfile", output => $output});
     clean();
@@ -1232,7 +1243,7 @@ sub imtitle {
     logger($subname, "missing file: $tmpfile_title_button\n", 3) unless -f $tmpfile_title_button;
     logger($subname, "missing file: $tmpfile_title_bar\n", 3) unless -f $tmpfile_title_bar;
 
-    imappend({input => "$tmpfile_title_button,$input[0]", output => $output, vertical => 1, horizontal => 1});
+    imappend({input => "$tmpfile_title_button,$input[0]", output => $output, vertical => 1});
     clean();
 
     pretty($subname, "remove $tmpdir ");
@@ -1259,8 +1270,10 @@ sub imextend {
     # params {{{
     my ($opts) = @_; # hashref
     $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output = $opts->{output}       // '';
+    my $inputs   = $opts->{input}        // '';
+    my $output   = $opts->{output}       // '';
+    my $mirror   = $opts->{mirror}       // 0;
+    my $gradient = $opts->{gradient}     // 1;
     my %color  = (
         background => $opts->{color_background} // $default{color}{background},
         temperory  => $opts->{color_temperory}  // $default{color}{temperory},
@@ -1292,8 +1305,14 @@ sub imextend {
     my $W = $x + $rate;
     my $H = $y + $rate;
 
+    ($color{background}, $color{temperory}) = ($color{temperory}, $color{background}) if $mirror;
+
     pretty("$subname", "$input[0] > $output ");
-    my @exe = (
+    my @exe;
+    unless ($gradient) {
+        $color{temperory} = $color{background};
+    }
+    @exe = (
         $runner,
         '(',
             '-size', "${W}x${H}",
@@ -1358,13 +1377,14 @@ sub imsrc {
         },
     );
     my %alpha = (
-        apply       => $opts->{alpha_apply} // 0,
+        apply       => $opts->{alpha_apply} // 1,
+        width       => $opts->{alpha_width} // 20,
     );
     my %border = (
         width       => $opts->{border_width} // 25,
     );
     my %gradient = (
-        apply  => $opts->{gradient_apply}    // 0,
+        apply  => $opts->{gradient_apply}    // 1,
         mirror => $opts->{gradient_mirror}   // 0,
         rotate => $opts->{gradient_rotate}   // 0,
         width  => $opts->{gradient_width}    // 100,
@@ -1435,8 +1455,7 @@ sub imsrc {
     check_exit_code($exit_code);
 
     # extra filters and visual effects
-    imtrim({input => $tmpfile_image, output => $output});
-    clean();
+    imtrim({input => $tmpfile_image, output => $output}); clean();
     imshadow({
         input => $output,
         output => $output,
@@ -1445,18 +1464,21 @@ sub imsrc {
         border_width => $border{width},
         border_color => '#151515',
         background_color => 'none',
-    });
-    clean();
-    imtrim({input => $output, output => $output});
-    clean();
-    imtitle({input => $output, output => $output, frame_title => $frame{title}, background_color => $color{background}});
-    clean();
-    imround({input => $output, output => $output, round => $round});
-    clean();
-    imextend({input => $output, output => $output, rate => 2});
-    clean();
-    imround({input => $output, output => $output, round => $round});
-    clean();
+    }); clean();
+    imtrim({input => $output, output => $output}); clean();
+    imtitle({input => $output, output => $output, frame_title => $frame{title}, background_color => $color{background}}); clean();
+    imround({input => $output, output => $output, round => $round}); clean();
+    imextend({input => $output, output => $output, rate => 2}); clean();
+    imround({input => $output, output => $output, round => $round}); clean();
+    imextend({input => $output, output => $output, rate => 2, mirror => 1}); clean();
+    imround({input => $output, output => $output, round => $round}); clean();
+    imextend({input => $output, output => $output, rate => 2}); clean();
+    imround({input => $output, output => $output, round => $round}); clean();
+    # imextend({input => $output, output => $output, rate => 1, mirror => 1}); clean();
+    # imround({input => $output, output => $output, round => $round}); clean();
+    if ($alpha{apply}) {
+        imextend({input => $output, output => $output, rate => $alpha{width}, gradient => 0, color_background => 'none'}); clean();
+    }
     if ($shadow{apply}) {
         imshadow({
             input => $output,
@@ -1465,8 +1487,7 @@ sub imsrc {
             shadow_rate  => $shadow{rate},
             shadow_color => $shadow{color},
             border_width => 10,
-        });
-        clean();
+        }); clean();
     }
     if ($shadow{apply}) {
         imshadow({
@@ -1476,22 +1497,20 @@ sub imsrc {
             shadow_rate  => $shadow{rate} * 10,
             shadow_color => $shadow{color},
             border_width => 10,
-        });
-        clean();
+        }); clean();
     }
     if ($gradient{apply}) {
         imgradient({
             input => $output,
             output => $output,
-            color_gradient_first => "",
-            color_gradient_second => "",
+            color_first => $color{gradient}{first},
+            color_second => $color{gradient}{second},
             gradient_width => "",
             gradient_height => "",
             mirror => $gradient{mirror},
             rotate => $gradient{rotate},
             orientation => $gradient{orientation},
-        });
-        clean();
+        }); clean();
     }
 
     # clean up the mess
@@ -1569,8 +1588,7 @@ sub impalette {
     }
 
     print(STREAM check_exit_code($exit_code));
-
-    return $output;
+    return @palette;
 }
 # }}}
 
@@ -1807,23 +1825,31 @@ if ($cmd eq "src") {
         output => $output,
         language => $language,
         linenumber => $linenumber,
-        alpha_apply => 0,
-        shadow_apply => 0,
+        alpha_apply => 1,
+        alpha_width => 20,
+        shadow_apply => 1,
+        shadow_double => 0,
         gradient_apply => 1,
-        gradient_mirror => 1,
-        gradient_rotate => 0,
+        gradient_mirror => 0,
+        gradient_rotate => 72.5,
         gradient_orientation => 'vertical',
+        color_gradient_first => '#9F8F6D',
+        color_gradient_second => '#6F8B88',
     });
 }
 
-# if ($cmd eq "palette") {
-#     impalette({input => @input, type => 'hex'});
-# }
+if ($cmd eq "palette") {
+    my @palette = impalette({input => @input, type => 'hex'});
+    print(STREAM "\n\n");
+    foreach my $color (@palette) {
+        print(STREAM "  $color\n");
+    }
+}
 
-# if ($cmd eq "string") {
-#     @input = ('null') unless @input;
-#     imstring({input => @input, output => $output, text => "Simple Test!"});
-# }
+if ($cmd eq "string") {
+    @input = ('null') unless @input;
+    imstring({input => @input, output => $output, text => "Simple Test!"});
+}
 
 # imcrop({input => join(",", @input), output => $output, shape => "circle"}) if $cmd eq "gradient";
 # imcrop({input => join(",", @input), output => $output, shape => "square"}) if $cmd eq "gradient";
