@@ -124,7 +124,7 @@ foreach my $func (@subs) {
 
 # usage {{{
 sub print_usage {
-my $command = $_[0];
+my $command = $_[0] // "";
 
 # messages {{{
 
