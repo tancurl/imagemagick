@@ -5,14 +5,15 @@ use warnings;
 use strict;
 use Getopt::Long;
 use File::Basename;
-use File::Path qw(remove_tree);
-use File::Path qw(make_path);
+use File::Path qw(remove_tree make_path);
 use Cwd;
 use IO::Handle;
 use POSIX qw(strftime);
 use Term::ANSIColor;
 use Symbol;
 use Time::HiRes qw(sleep);
+use Symbol;
+use IPC::Open3;
 $| = 1;  # autoflush
 # }}}
 
@@ -75,14 +76,17 @@ my %default = (
 my @input;
 my $language;
 my $output;
+my $round;
 my $text;
 my $linenumber;
 
 my $background;
 my $font;
+my $color;
 my $foreground;
 my $gradient;
 my $gradient_rotation;
+my $gradient_mirror;
 my $height;
 my $orientation;
 my $rate;
@@ -104,6 +108,8 @@ GetOptions(
     "language=s"     => \$language,
     "output=s"       => \$output,
     "text=s"         => \$text,
+    "round=s"        => \$round,
+    "color=s"        => \$color,
     "input=s@"       => \@input,
 
     "horizontal"     => \$horizontal,
@@ -122,6 +128,8 @@ GetOptions(
     "palette=s"      => \$palette,
 
     "gradient"             => \$gradient,
+    "rotate=s"             => \$gradient_rotation,
+    "gradient-mirror"      => \$gradient_mirror,
     "gradient-rotation=s"  => \$gradient_rotation,
     "gradient-color=s@"    => \@gradient_color,
 
@@ -520,6 +528,20 @@ sub get_syntax {
 }
 # }}}
 
+# shell wrapper {{{
+sub shell {
+    my (@cmd) = @_;
+    my $stdin = undef; my $stdout; my $stderr = gensym;
+    my $pid = open3(
+        $stdin, $stdout, $stderr,
+        @cmd,
+    );
+    waitpid($pid, 0);
+    my $err = $? >> 8;
+    return $err;
+}
+# }}}
+
 # }}}
 
 # workers {{{
@@ -539,7 +561,8 @@ sub imsolid {
 
     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
 
-    logger($subname, "missing file: output: $output: No such file or directory\n", 3) unless -f $output;
+    # logger($subname, "missing file: output: $output: No such file or directory\n", 3) unless -f $output;
+    logger($subname, "output: $output: file exists. overwritting..\n", 2) if -f $output;
     logger($subname, "No color image is specified, using default\n", 2) unless $background;
 
     pretty("$subname", "${width}x${height}: $background > $output ");
@@ -550,7 +573,7 @@ sub imsolid {
         $output,
     );
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -600,7 +623,7 @@ sub imresize {
         $output,
     );
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 
@@ -652,7 +675,7 @@ sub imshadow {
         $output,
     );
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -688,7 +711,7 @@ sub imalpha {
         $output,
     );
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -721,7 +744,7 @@ sub imtrim {
         $output,
     );
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -774,7 +797,7 @@ sub imappend {
     }
     push(@exe, $output);
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -816,7 +839,7 @@ sub imblur {
         $output,
     );
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -884,7 +907,7 @@ sub imcrop {
         );
     }
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -924,7 +947,7 @@ sub imcolor {
         $output,
     );
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -963,7 +986,7 @@ sub immerge {
             ${output}
     );
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -1009,7 +1032,8 @@ sub imgradient {
     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
 
     logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+    # logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+    # logger($subname, "missing file: input: $input[0]: No such file or directory\n", 2) unless -f $input[0];
     logger($subname, "No output image is specified\n", 3) unless $output;
 
     my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
@@ -1069,7 +1093,7 @@ sub imgradient {
         $tmpfile,
     );
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 
@@ -1080,8 +1104,7 @@ sub imgradient {
             shadow_rate => 5,
             shadow_width => 20,
             background_color => 'none'
-        });
-        clean();
+        }); clean();
         if ($shadow{double}) {
             imshadow({
                 input => $output,
@@ -1089,12 +1112,10 @@ sub imgradient {
                 shadow_rate => 5,
                 shadow_width => 20,
                 background_color => 'none'
-            });
-            clean();
+            }); clean();
         }
     }
-    immerge({input => "${output},$tmpfile", output => $output});
-    clean();
+    immerge({input => "${output},$tmpfile", output => $output}); clean();
 
     pretty($subname, "remove $tmpdir ");
     remove_tree($tmpdir, {error => \my $err});
@@ -1138,7 +1159,7 @@ sub imnegate {
         $output,
     );
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -1187,7 +1208,7 @@ sub imround {
         $output,
     );
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -1220,7 +1241,7 @@ sub imshot {
         $output,
     );
 
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -1296,7 +1317,7 @@ sub imtitle {
         "-annotate", "+000$vertical", $title,
         $tmpfile_title_bar,
     );
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 
@@ -1309,7 +1330,7 @@ sub imtitle {
             "-fill", $color{button}{maxim}, "-draw", "circle 68,19 75,19",
             $tmpfile_title_button,
     );
-    $_exit_code = system(@exe);
+    $_exit_code = shell(@exe);
     $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 
@@ -1369,8 +1390,9 @@ sub imextend {
 
     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
 
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
     logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+    logger($subname, "No input image is specified\n", 3) unless $input[0];
+    # logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
     logger($subname, "No output image is specified\n", 3) unless $output;
 
     my $x = `$identify -format '\%w' $input[0]`;
@@ -1407,7 +1429,7 @@ sub imextend {
         '-composite',
         $output,
     );
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     print(STREAM check_exit_code($exit_code));
 }
@@ -1510,7 +1532,7 @@ sub imsrc {
             "-o", $tmpfile_pango
     );
     push(@exe, ("-l", $language)) if $language;
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
     my $exit_code = $_exit_code >> 8;
     check_exit_code($exit_code);
 
@@ -1523,7 +1545,7 @@ sub imsrc {
         "pango:\@$tmpfile_pango",
         $tmpfile_image,
     );
-    $_exit_code = system(@exe);
+    $_exit_code = shell(@exe);
     $exit_code = $_exit_code >> 8;
     check_exit_code($exit_code);
 
@@ -1684,7 +1706,7 @@ sub imstring {
         size => $opts->{size}     // 0,
     );
     my %gap = (
-        i => $opts->{gap_i}    // 1,
+        i => $opts->{gap_i}    // 0,
         x => $opts->{gap_x}    // 0,
         y => $opts->{gap_y}    // 0,
     );
@@ -1725,8 +1747,8 @@ sub imstring {
         $merge = 0;
     }
 
-    print("width: $width\n");
-    print("height: $height\n");
+    # print("width: $width\n");
+    # print("height: $height\n");
     if ($merge) {
         my %resolution = (
             a => `$identify -format '%wx%h' $input[0]`,
@@ -1736,9 +1758,9 @@ sub imstring {
         $width = $resolution{x} / $scale;
         $height = $resolution{y} / $scale;
     }
-    print("width: $width\n");
-    print("height: $height\n");
-    # exit 0;
+    # print("width: $width\n");
+    # print("height: $height\n");
+    # # exit 0;
 
     my $resolution = "${width}x$height";
     my $inner_gap;
@@ -1772,7 +1794,7 @@ sub imstring {
         "-extent", $resolution,
         $tmpfile_text
     ));
-    my $_exit_code = system(@exe);
+    my $_exit_code = shell(@exe);
 
     if ($merge) {
         # imtrim({input => $tmpfile_text, output => $tmpfile_text});
@@ -1829,7 +1851,7 @@ sub imstring {
 #         $output,
 #     );
 #
-#     my $_exit_code = system(@exe);
+#     my $_exit_code = shell(@exe);
 #     my $exit_code = $_exit_code >> 8;
 #     print(STREAM check_exit_code($exit_code));
 # }
@@ -1855,7 +1877,16 @@ if ($cmd eq "shadow") {
     imshadow({
         input => join(",", @input),
         output => $output,
+        shadow_color => $background,
     })
+}
+
+if ($cmd eq "round") {
+    imround({
+        input => join(",", @input),
+        output => $output,
+        round => $round,
+    });
 }
 
 if ($cmd eq "src") {
@@ -1917,7 +1948,10 @@ if ($cmd eq "string") {
     imstring({
         input => @input,
         output => $output,
+        width => $width,
+        height => $height,
         text => $text,
+        font => $font,
         color_background => $background,
         color_foreground => $foreground,
         size => $size,
@@ -1926,8 +1960,10 @@ if ($cmd eq "string") {
 
 if ($cmd eq "extend") {
     imextend({
-        input => @input,
+        input => join(",", @input),
         output => $output,
+        color_background => $background,
+        gradient => $gradient,
         rate => $rate,
         color_background => $background,
         x => $width,
@@ -1950,6 +1986,20 @@ if ($cmd eq "solid") {
         height => $height,
         background => $background,
         output => $output,
+    });
+}
+
+if ($cmd eq "gradient") {
+    imgradient({
+        input => $output,
+        output => $output,
+        color_first => $gradient_color[0],
+        color_second => $gradient_color[1],
+        gradient_width => "",
+        gradient_height => "",
+        mirror => $gradient_mirror,
+        rotate => $gradient_rotation,
+        orientation => $orientation,
     });
 }
 
