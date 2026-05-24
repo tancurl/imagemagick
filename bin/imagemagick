@@ -82,7 +82,7 @@ my $linenumber;
 
 my $background;
 my $font;
-my $color;
+my @color;
 my $foreground;
 my $gradient;
 my $gradient_rotation;
@@ -100,6 +100,9 @@ my $shadow;
 my $alpha;
 my @gradient_color;
 
+my $rotation;
+my $mirror;
+
 my $help = 0;
 my $prompt = basename($0);
 
@@ -109,7 +112,7 @@ GetOptions(
     "output=s"       => \$output,
     "text=s"         => \$text,
     "round=s"        => \$round,
-    "color=s"        => \$color,
+    "color=s@"       => \@color,
     "input=s@"       => \@input,
 
     "horizontal"     => \$horizontal,
@@ -132,6 +135,9 @@ GetOptions(
     "gradient-mirror"      => \$gradient_mirror,
     "gradient-rotation=s"  => \$gradient_rotation,
     "gradient-color=s@"    => \@gradient_color,
+
+    "mirror"      => \$mirror,
+    "rotate=s"    => \$rotation,
 
     'h|help'         => \$help,
 ) or die "Invalid flags. Use -h for help\n";
@@ -812,9 +818,10 @@ sub imblur {
     $opts ||= {};
     my $inputs = $opts->{input}        // '';
     my $output = $opts->{output}       // '';
-    my $blur   = $opts->{blur}         // 3;
-    my $rate   = $opts->{rate}         // 5;
-    my $scale  = $opts->{scale}        // 3;
+    my $blur   = $opts->{blur}         // 4;
+    my $rate   = $opts->{rate}         // 2;
+    my $scale  = $opts->{scale}        // 4;
+    my $geo    = $opts->{geo}          // 0;
     # }}}
 
     my @input = split(",", $inputs);
@@ -827,7 +834,7 @@ sub imblur {
 
     pretty("$subname", "$input[0] > $output ");
     my $format = "\%[fx:w+((w+h)/${scale}*0.1)]x\%[fx:h+((w+h)/${scale}*0.1)]";
-    my $geo = `$identify -format "$format" "@{input}"`;
+    $geo = `$identify -format "$format" "@{input}"` unless $geo;
 
     my @exe = (
         $runner,
@@ -1025,6 +1032,10 @@ sub imgradient {
         x  => $opts->{position_x}  // 1,
         y  => $opts->{position_y}  // 1,
     );
+    my %res = (
+        x => $opts->{x}  // 0,
+        y => $opts->{y}  // 0,
+    );
     # }}}
 
     my @input = split(",", $inputs);
@@ -1041,8 +1052,17 @@ sub imgradient {
     make_path($tmpdir);
 
     my $resolution   = `$identify -format '%wx%h' $input[0]`;
-    my $resolution_x = `$identify -format '%w' $input[0]` + $border{rate};
-    my $resolution_y = `$identify -format '%h' $input[0]` + $border{rate};
+    my ($resolution_x, $resolution_y);
+    if ($res{x}) {
+        $resolution_x = $res{x};
+    } else {
+        $resolution_x = `$identify -format '%w' $input[0]` + $border{rate};
+    }
+    if ($res{y}) {
+        $resolution_y = $res{y};
+    } else {
+        $resolution_y = `$identify -format '%h' $input[0]` + $border{rate};
+    }
 
     ($color{first}, $color{second}) = ($color{second}, $color{first}) if $mirror;
 
@@ -1824,38 +1844,97 @@ sub imstring {
 }
 # }}}
 
-# # trim {{{
-# sub imtrim {
-#     my $subname = (split(":", (caller(0))[3]))[-1];
-#
-#     # params {{{
-#     my ($opts) = @_; # hashref
-#     $opts ||= {};
-#     my $inputs = $opts->{input}        // '';
-#     my $output = $opts->{output}       // '';
-#     # }}}
-#
-#     my @input = split(",", $inputs);
-#
-#     my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-#
-#     logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-#     logger($subname, "No input image is specified\n", 3) unless $input[0];
-#     logger($subname, "No output image is specified\n", 3) unless $output;
-#
-#     pretty("$subname", "$input[0] > $output ");
-#     my @exe = (
-#         $runner,
-#         "-trim",
-#         $input[0],
-#         $output,
-#     );
-#
-#     my $_exit_code = shell(@exe);
-#     my $exit_code = $_exit_code >> 8;
-#     print(STREAM check_exit_code($exit_code));
-# }
-# # }}}
+# trim {{{
+sub imbox {
+    my $subname = (split(":", (caller(0))[3]))[-1];
+
+    # params {{{
+    my ($opts) = @_; # hashref
+    $opts ||= {};
+    my $inputs      = $opts->{input}       // '';
+    my $output      = $opts->{output}      // '';
+    my $color       = $opts->{color}       // '';
+    my $mirror      = $opts->{mirror}      // 0;
+    my $rotate      = $opts->{rotate}      // 0;
+    # }}}
+
+    my @input  = split(",", $inputs);
+    my @colors = split(",", $color);
+    my $count  = scalar @colors;
+
+    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+    logger($subname, "No input image is specified\n", 3) unless $input[0];
+    logger($subname, "No output image is specified\n", 3) unless $output;
+
+    pretty("$subname", "$input[0] > $output ");
+
+    my $fix;
+    my $x = `$identify -format "%w" "@{input}"`;
+    my $y = `$identify -format "%h" "@{input}"`;
+
+    if ($x ge $y) {
+        $fix = $x;
+    } else {
+        $fix = $y;
+    }
+
+    if ($count) {
+        if ($count gt 1) {
+            imgradient({
+                input => $input[0],  # <1> loop over it if it's possible
+                output => $output,
+                color_first => $color[0],
+                color_second => $color[1],
+                gradient_width => "",
+                gradient_height => "",
+                border_rate => 0,
+                x => $fix,
+                y => $fix,
+                rotate => $rotate,
+                mirror => $mirror,
+            });
+        } else {
+            my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
+            my $tmpfile = "$tmpdir/imagemagick-tmp-box.png";
+            make_path($tmpdir);
+            imsolid({
+                width => $fix,
+                height => $fix,
+                background => $color[0],
+                output => $tmpfile,
+            });
+            immerge({
+                input => sprintf("%s,%s", $input[0], $tmpfile),
+                output => $output,
+            });
+            remove_tree($tmpdir);
+        }
+    } else {
+        imblur({
+            input => join(",", @input),
+            output => $output,
+            geo => sprintf("%sx%s", $fix, $fix),
+        });
+    immerge({
+            input => sprintf("%s,%s", $input[0], $output),
+            output => $output,
+        });
+    }
+
+    # my @exe = (
+    #     $runner,
+    #     "-trim",
+    #     $input[0],
+    #     $output,
+    # );
+    #
+    # my $_exit_code = shell(@exe);
+    # my $exit_code = $_exit_code >> 8;
+    # print(STREAM check_exit_code($exit_code));
+}
+# }}}
 
 # }}}
 
@@ -1989,9 +2068,34 @@ if ($cmd eq "solid") {
     });
 }
 
+if ($cmd eq "blur") {
+    imblur({
+        input => join(",", @input),
+        output => $output,
+        # rate => $rate,
+        # blur => $blur,
+        # scale => $scale,
+    });
+}
+
+if ($cmd eq "box") {
+    imbox({
+        input  => join(",", @input),
+        output => $output,
+        color  => join(",", @color),
+        # color_first => $gradient_color[0],
+        # color_second => $gradient_color[1],
+        # gradient_width => "",
+        # gradient_height => "",
+        mirror => $mirror,
+        rotate => $rotation,
+        # orientation => $orientation,
+    });
+}
+
 if ($cmd eq "gradient") {
     imgradient({
-        input => $output,
+        input => join(",", @input),
         output => $output,
         color_first => $gradient_color[0],
         color_second => $gradient_color[1],
