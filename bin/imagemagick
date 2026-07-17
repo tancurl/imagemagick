@@ -5,15 +5,11 @@ use warnings;
 use strict;
 use Getopt::Long;
 use File::Basename;
-use File::Path qw(remove_tree make_path);
-use Cwd;
-use IO::Handle;
+# use Cwd;
 use POSIX qw(strftime);
-use Term::ANSIColor;
 use Symbol;
 use Time::HiRes qw(sleep);
-use Symbol;
-use IPC::Open3;
+use IO::Handle;
 $| = 1;  # autoflush
 # }}}
 
@@ -25,32 +21,6 @@ my $std_stream = 2;
 my $STREAM;
 *STREAM = *STDERR if $std_stream == 2;
 *STREAM = *STDOUT if $std_stream == 1;
-
-# get list of subroutines {{{
-my $filename = $0; # Replace with your script name
-open my $fh, '<', $filename or die "Cannot open $filename: $!";
-my @lines = <$fh>;
-close $fh;
-# Create a hash to store subroutine names
-my %subroutines;
-# Iterate through each line to find subroutine definitions
-foreach my $line (@lines) {
-    if ($line =~ /^\s*sub\s+(\w+)/) {
-        # $subroutines{$1} = 1;  # Store the subroutine name
-        if ($line =~ /^\s*sub\s+(im\w+)/) {
-            $subroutines{$1} = 1;  # Store the subroutine name
-        }
-    }
-}
-# Print the list of subroutines
-my @subs_unsort = ();
-for (keys %subroutines) {
-    my $_sub = $_;
-    $_sub =~ s/^im//;
-    push(@subs_unsort, $_sub);
-}
-my @subs = sort @subs_unsort;
-# }}}
 
 # variables {{{
 my $home = $ENV{"HOME"};
@@ -70,74 +40,120 @@ my %default = (
         size  => 22,
     },
 );
+
+
+my $runner;
+my $composite;
+my $highlighter;
+my $import;
+my $identify;
+my $found_im;
+
+if (mob::command("magick")) {
+    $found_im = 0;
+    $runner = mob::command("magick");
+} else {
+    $found_im = 1;
+}
+
+if (mob::command("convert")) {
+    $found_im = 0;
+    $runner = mob::command("convert");
+    $composite = mob::command("composite");
+    $import = mob::command("import");
+    $highlighter = mob::command("pygmentize");
+    $identify = mob::command("identify");
+} else {
+    $found_im = 1;
+}
+
+if ($found_im) {
+    print(STREAM "ImageMagick is not installed\n");
+    exit 1;
+}
 # }}}
 
 # flags {{{
-my @input;
-my $language;
-my $output;
-my $round;
-my $text;
-my $linenumber;
 
-my $background;
-my $font;
-my @color;
-my $foreground;
+# vars {{{
+# boolean
+my $alpha;
 my $gradient;
-my $gradient_rotation;
 my $gradient_mirror;
+my $horizontal;
+my $linenumber;
+my $mirror;
+my $shadow;
+my $vertical;
+
+# string
+my $background;
+my $blur;
+my $border;
+my $expand;
+my $font;
+my $foreground;
+my $gradient_rotation;
 my $height;
+my $language;
 my $orientation;
+my $output;
+my $palette;
+my $position;
 my $rate;
+my $rotation;
+my $round;
+my $scale;
 my $shape;
 my $size;
 my $width;
-my $palette;
-my $horizontal;
-my $vertical;
-my $shadow;
-my $alpha;
-my @gradient_color;
 
-my $rotation;
-my $mirror;
+# array
+my @color;
+my @gradient_color;
+my @input;
+my @text;
+# }}}
 
 my $help = 0;
 my $prompt = basename($0);
 
 GetOptions(
-    "linenumber"     => \$linenumber,
-    "language=s"     => \$language,
-    "output=s"       => \$output,
-    "text=s"         => \$text,
-    "round=s"        => \$round,
-    "color=s@"       => \@color,
-    "input=s@"       => \@input,
+    "alpha"           => \$alpha,
+    "gradient"        => \$gradient,
+    "gradient-mirror" => \$gradient_mirror,
+    "horizontal"      => \$horizontal,
+    "linenumber"      => \$linenumber,
+    "mirror"          => \$mirror,
+    "shadow"          => \$shadow,
+    "vertical"        => \$vertical,
 
-    "horizontal"     => \$horizontal,
-    "vertical"       => \$vertical,
-    "alpha"          => \$alpha,
-    "shadow"         => \$shadow,
-    "background=s"   => \$background,
-    "font=s"         => \$font,
-    "foreground=s"   => \$foreground,
-    "height=s"       => \$height,
-    "orientation=s"  => \$orientation,
-    "rate=s"         => \$rate,
-    "shape=s"        => \$shape,
-    "size=s"         => \$size,
-    "width=s"        => \$width,
-    "palette=s"      => \$palette,
-
-    "gradient"             => \$gradient,
-    "rotate=s"             => \$gradient_rotation,
-    "gradient-mirror"      => \$gradient_mirror,
+    "background=s"         => \$background,
+    "blur=s"               => \$blur,
+    "border=s"             => \$border,
+    "expand=s"             => \$expand,
+    "font=s"               => \$font,
+    "foreground=s"         => \$foreground,
     "gradient-rotation=s"  => \$gradient_rotation,
-    "gradient-color=s@"    => \@gradient_color,
+    "height=s"             => \$height,
+    "language=s"           => \$language,
+    "orientation=s"        => \$orientation,
+    "output=s"             => \$output,
+    "palette=s"            => \$palette,
+    "position=s"           => \$position,
+    "rate=s"               => \$rate,
+    "rotate=s"             => \$rotation,
+    "round=s"              => \$round,
+    "scale=s"              => \$scale,
+    "shape=s"              => \$shape,
+    "size=s"               => \$size,
+    "width=s"              => \$width,
+    # "rotate=s"             => \$gradient_rotation,
 
-    "mirror"      => \$mirror,
-    "rotate=s"    => \$rotation,
+    "color=s@"          => \@color,
+    "gradient-color=s@" => \@gradient_color,
+    "input=s@"          => \@input,
+    "text=s@"           => \@text,
 
     'h|help'         => \$help,
 ) or die "Invalid flags. Use -h for help\n";
@@ -145,16 +161,6 @@ GetOptions(
 
 # command {{{
 my $cmd = shift @ARGV;
-# }}}
-
-# calculate blank space {{{
-my $blank_height = 0;
-foreach my $func (@subs) {
-    my $tl = length($func);
-    if ($tl gt $blank_height) {
-        $blank_height = $tl;
-    }
-}
 # }}}
 
 # # SIGINT {{{
@@ -175,1804 +181,1887 @@ foreach my $func (@subs) {
 
 # functions
 
-# helper {{{
+# helpers {{{
+{
+    package mob;
 
-# usage {{{
-sub print_usage {
-my $command = $_[0] // "";
+    use Term::ANSIColor;
+    use POSIX qw(strftime);
+    use Symbol;
+    use IPC::Open3;
 
-# messages {{{
+    *STREAM = *STDERR if $std_stream == 2;
+    *STREAM = *STDOUT if $std_stream == 1;
 
-# main {{{
-my $main = <<"EOF";
-Image minapulation script -- ImageMagick wrapper
+    # usage {{{
+    sub usage {
+        my $command = $_[0] // "";
 
-usage: $prompt COMMAND OPTIONS
+        # # args {{{
+        # print(STREAM $alpha)    if $command eq "alpha";
+        # print(STREAM $append)   if $command eq "append";
+        # print(STREAM $blur)     if $command eq "blur";
+        # print(STREAM $color)    if $command eq "color";
+        # print(STREAM $crop)     if $command eq "crop";
+        # print(STREAM $extend)   if $command eq "extend";
+        # print(STREAM $gradient) if $command eq "gradient";
+        # print(STREAM $merge)    if $command eq "merge";
+        # print(STREAM $negate)   if $command eq "negate";
+        # print(STREAM $palette)  if $command eq "palette";
+        # print(STREAM $resize)   if $command eq "resize";
+        # print(STREAM $round)    if $command eq "round";
+        # print(STREAM $shadow)   if $command eq "shadow";
+        # print(STREAM $shot)     if $command eq "shot";
+        # print(STREAM $src)      if $command eq "src";
+        # print(STREAM $string)   if $command eq "string";
+        # print(STREAM $title)    if $command eq "title";
+        # print(STREAM $trim)     if $command eq "trim";
+        # print(STREAM $main)     unless $command;
+        # # }}}
 
-   • COMMAND
-       alpha         make an image transparent -- fade
-       append        append images vertically or horizontally
-       blur          add blur effect to image
-       color         find and replace a color in image
-       crop          crop image
-       extend        extend image border
-       gradient      add gradient background to image
-       merge         marge two images (put one on top of another)
-       negate        reverse image's color
-       palette       generate hex/rgb color palette from the image
-       resize        resize the image
-       round         round the image's corners
-       shadow        add shadow effects
-       shot          # WIP -- take screenshot from desktop / window
-       src           generate image from a src file with syntax highlight
-       string        add string to an image -- or generate one
-       title         add window (application) like frame to the image
-       trim          trim borders
+        exit 0;
+    }
+    # }}}
 
-   • OPTION
-       try help page of each command
+    # command {{{
+    sub command {
+        my $program = $_[0];
+        my $path = $ENV{"PATH"};
+        my @directories = split(":", $path);
+        my $found = '';
+        foreach my $dir (@directories) {
+            my $full_path = "$dir/$program";
+            if (-x $full_path) {
+                $found = $full_path;
+                last;
+            }
+        }
+        return $found;
+    }
+    # }}}
 
-   • example:
-       $prompt shadow -i input.png -o output.png
+    # clean {{{
+    sub clean {
+        # my $clean = "\b\b\b\b    ";
+        # print(STREAM $clean);
 
-EOF
-# }}}
+        my $repeat = 1;
+        my @spinner = ('|', '/', '-', '\\');
+        my $duration = shift;  # Duration to display the spinner
+        my $end_time = time() + $repeat;
 
-# alpha {{{
-my $alpha = <<"EOF";
-
-EOF
-# }}}
-
-# append {{{
-my $append = <<"EOF";
-
-EOF
-# }}}
-
-# blur {{{
-my $blur = <<"EOF";
-
-EOF
-# }}}
-
-# color {{{
-my $color = <<"EOF";
-
-EOF
-# }}}
-
-# crop {{{
-my $crop = <<"EOF";
-
-EOF
-# }}}
-
-# extend {{{
-my $extend = <<"EOF";
-
-EOF
-# }}}
-
-# gradient {{{
-my $gradient = <<"EOF";
-
-EOF
-# }}}
-
-# merge {{{
-my $merge = <<"EOF";
-
-EOF
-# }}}
-
-# negate {{{
-my $negate = <<"EOF";
-
-EOF
-# }}}
-
-# palette {{{
-my $palette = <<"EOF";
-
-EOF
-# }}}
-
-# resize {{{
-my $resize = <<"EOF";
-
-EOF
-# }}}
-
-# round {{{
-my $round = <<"EOF";
-
-EOF
-# }}}
-
-# shadow {{{
-my $shadow = <<"EOF";
-
-EOF
-# }}}
-
-# shot {{{
-my $shot = <<"EOF";
-
-EOF
-# }}}
-
-# src {{{
-my $src = <<"EOF";
-
-EOF
-# }}}
-
-# string {{{
-my $string = <<"EOF";
-
-EOF
-# }}}
-
-# title {{{
-my $title = <<"EOF";
-
-EOF
-# }}}
-
-# trim {{{
-my $trim = <<"EOF";
-
-EOF
-# }}}
-
-# }}}
-
-# args {{{
-print(STREAM $alpha)    if $command eq "alpha";
-print(STREAM $append)   if $command eq "append";
-print(STREAM $blur)     if $command eq "blur";
-print(STREAM $color)    if $command eq "color";
-print(STREAM $crop)     if $command eq "crop";
-print(STREAM $extend)   if $command eq "extend";
-print(STREAM $gradient) if $command eq "gradient";
-print(STREAM $merge)    if $command eq "merge";
-print(STREAM $negate)   if $command eq "negate";
-print(STREAM $palette)  if $command eq "palette";
-print(STREAM $resize)   if $command eq "resize";
-print(STREAM $round)    if $command eq "round";
-print(STREAM $shadow)   if $command eq "shadow";
-print(STREAM $shot)     if $command eq "shot";
-print(STREAM $src)      if $command eq "src";
-print(STREAM $string)   if $command eq "string";
-print(STREAM $title)    if $command eq "title";
-print(STREAM $trim)     if $command eq "trim";
-print(STREAM $main)     unless $command;
-# }}}
-
-exit 0;
-}
-# }}}
-
-# command {{{
-sub command {
-    my $program = $_[0];
-    my $path = $ENV{"PATH"};
-    my @directories = split(":", $path);
-    my $found = '';
-    foreach my $dir (@directories) {
-        my $full_path = "$dir/$program";
-        if (-x $full_path) {
-            $found = $full_path;
-            last;
+        while (time() < $end_time) {
+            for my $char (@spinner) {
+                print STREAM "\r";
+                print STREAM $char;
+                sleep(0.06);
+                print STREAM "\b ";
+            }
         }
     }
-    return $found;
-}
+    # }}}
 
-my $runner;
-my $composite;
-my $highlighter;
-my $import;
-my $identify;
-my $found_im;
-
-if (command("magick")) {
-    $found_im = 0;
-    $runner = command("magick");
-} else {
-    $found_im = 1;
-}
-
-if (command("convert")) {
-    $found_im = 0;
-    $runner = command("convert");
-    $composite = command("composite");
-    $import = command("import");
-    $highlighter = command("pygmentize");
-    $identify = command("identify");
-} else {
-    $found_im = 1;
-}
-
-if ($found_im) {
-    print(STREAM "ImageMagick is not installed\n");
-    exit 1;
-}
-# }}}
-
-# clean {{{
-sub clean {
-    # my $clean = "\b\b\b\b    ";
-    # print(STREAM $clean);
-
-    my $repeat = 1;
-    my @spinner = ('|', '/', '-', '\\');
-    my $duration = shift;  # Duration to display the spinner
-    my $end_time = time() + $repeat;
-
-    while (time() < $end_time) {
-        for my $char (@spinner) {
-            print STREAM "\r";
-            print STREAM $char;
-            sleep(0.06);
-            print STREAM "\b ";
+    # exit code {{{
+    sub check_exit_code {
+        my ($package, $filename, $line) = caller();
+        my $exit_code = $_[0];
+        my $fail = 'fail';  # ×
+        my $done = "done";  # ✓
+        my $side = "fg";
+        $fail = "$fail" if $side eq "fg";
+        $done = "$done" if $side eq "fg";
+        $fail = " $fail " if $side eq "bg";
+        $done = " $done " if $side eq "bg";
+        my %color = (
+            bg => {
+                fail => "on_red",
+                done => "on_green",
+            },
+            fg => {
+                fail => "red",
+                done => "green",
+            },
+        );
+        my $msg = "";
+        if ($exit_code) {
+            $msg = sprintf(" ... %s",
+                colored($fail, $color{$side}{fail}));
+            print("\n");
+            exit $line;
+        } else {
+            $msg = sprintf(" ... %s",
+                colored($done, $color{$side}{done}));
         }
+        return $msg;
     }
-}
-# }}}
+    # }}}
 
-# exit code {{{
-sub check_exit_code {
-    my ($package, $filename, $line) = caller();
-    my $exit_code = $_[0];
-    my $fail = 'fail';  # ×
-    my $done = "done";  # ✓
-    my $side = "fg";
-    $fail = "$fail" if $side eq "fg";
-    $done = "$done" if $side eq "fg";
-    $fail = " $fail " if $side eq "bg";
-    $done = " $done " if $side eq "bg";
-    my %color = (
-        bg => {
-            fail => "on_red",
-            done => "on_green",
-        },
-        fg => {
-            fail => "bold red",
-            done => "bold green",
-        },
-    );
-    my $msg = "";
-    if ($exit_code) {
-        $msg = color($color{$side}{fail}).$fail.color("reset");
-        print("\n");
-        exit $line;
-    } else {
-        $msg = color($color{$side}{done}).$done.color("reset");
+    # log {{{
+    sub log {
+        my ($name, $msg, $level) = @_;
+        $level //= 1;
+        my ($package, $filename, $line) = caller();
+        my $current_date = strftime("%Y-%m-%d %H:%M:%S", localtime);
+
+        my $message;
+        if ($name) {
+            $message = sprintf "] %s %s %s::%-4s | %s",
+                $current_date, $prompt, $name, $line, $msg;
+        } else {
+            $message = sprintf "] %s %s %-4s | %s",
+                $current_date, $prompt, $line, $msg;
+        }
+        # my $message = "] $current_date ${prompt} ${package}::${name}   >>> ${line} | $msg";
+
+        return if $level == 0;
+        print($message) if $level == 1;
+        print(STREAM "\r") if $level != 1;
+        print(STREAM $message) if $level != 1;
+        print(STREAM "\n") if $level gt 3;
+        exit $line if $level ge 3;
+
     }
-    return $msg;
-}
-# }}}
+    # }}}
 
-# logger {{{
-sub logger {
-    my ($name, $msg, $level) = @_;
-    $name =~ s,^im,,;
-    $level //= 1;
-    my ($package, $filename, $line) = caller();
-    my $current_date = strftime("%Y-%m-%d %H:%M:%S", localtime);
-
-    my $message = "] $current_date ${prompt} ${package}::${name}   >>> ${line} | $msg";
-
-    return if $level == 0;
-    print($message) if $level == 1;
-    print(STREAM "\r") if $level != 1;
-    print(STREAM $message) if $level != 1;
-    print(STREAM "\n") if $level gt 3;
-    exit $line if $level ge 3;
-}
-# }}}
-
-# prettry {{{
-sub pretty {
-    my ($name, $msg, $level) = @_;
-    $name =~ s,^im,,;
-    $level //= 5;
-    my ($package, $filename, $line) = caller();
-
-    # left padding
-    my $current_length = $blank_height - length($name) + 1;
-    my $blank = " "x$current_length;
-
-    my $logcolor;
-    $logcolor = "black" if $level == 0;
-    $logcolor = "red" if $level == 1;
-    $logcolor = "green" if $level == 2;
-    $logcolor = "yellow" if $level == 3;
-    $logcolor = "blue" if $level == 4;
-    $logcolor = "magenta" if $level == 5;
-    $logcolor = "cyan" if $level == 6;
-    $logcolor = "white" if $level == 7;
-
-    my $message = "";
-
-    # $message = "$prompt ".color("bold $logcolor")."${package}::$name".color('reset')." $msg";
-    # $message = "$prompt ".color("bold $logcolor")."$name".color('reset').$blank.$msg;
-
-    $message = "$prompt ".color("bold $logcolor")."$name".color('reset').$blank;
-
-    print(STREAM "\r  $message ");
-
-    # print(STREAM "\033[K");  # clear the line
-    # print(STREAM "\r");
-    # print(STREAM "\033[F");  # move up
-    # print(STREAM "\033[2J");  # clear the screen
-    # print(STREAM "\033[H");   # move cursor to the top left
-}
-# }}}
-
-# get the language {{{
-sub get_syntax {
-    my $filename = $_[0];  # Replace with your file name
-    my $shebang;
-    open(my $fh, '<', $filename) or die "Could not open file '$filename' $!";
-    my $first_line = <$fh>;
-    $shebang = $first_line if $first_line =~ /^#!/;
-    chomp($shebang) if $shebang;
-    close($fh);
-    my $language;
-    if ($shebang) {
-        $language = (split("/", $shebang))[-1];
-        $language =~ s/env // if $language =~ /env /;
-        # print(STREAM "$shebang\n");
-    } else {
-        $language = `$highlighter -N $filename`;
-        chomp($language);
+    # get terminal width {{{
+    sub get_width {
+        # -------------------------------------------------
+        # Platform‑specific constant for the ioctl request
+        #   Linux   : 0x5413
+        #   macOS/BSD: 0x40087468
+        # Choose the one that matches your OS.
+        # -------------------------------------------------
+        use constant TIOCGWINSZ => 0x5413;   # <-- change if you’re on macOS/BSD
+        my $winsz = pack('S4', 0, 0, 0, 0);
+        my @handles = (
+            *STDOUT{IO},
+            *STDIN{IO},
+            do { open my $tty, '<', '/dev/tty' or die "Can't open /dev/tty: $!"; $tty },
+        );
+        my $got;
+        for my $fh (@handles) {
+            $got = ioctl($fh, TIOCGWINSZ, $winsz);
+            last if $got;
+        }
+        die "ioctl failed – not a terminal?" unless $got;
+        my ($rows, $cols, $xpixels, $ypixels) = unpack('S4', $winsz);
+        return $cols;
     }
-    return $language;
-}
-# }}}
+    # }}}
 
-# shell wrapper {{{
-sub shell {
-    my (@cmd) = @_;
-    my $stdin = undef; my $stdout; my $stderr = gensym;
-    my $pid = open3(
-        $stdin, $stdout, $stderr,
-        @cmd,
-    );
-    waitpid($pid, 0);
-    my $err = $? >> 8;
-    return $err;
-}
-# }}}
+    # prettry {{{
+    sub pretty {
+        my ($name, $msg, $level) = @_;
+        # $name =~ s,^im,,;
+        $level //= 6;
+        my ($package, $filename, $line) = caller();
 
+        # my $current_length = $blank_height - length($name) + 1;
+        # my $blank = " "x$current_length;
+
+        my $logcolor;
+        $logcolor = "black" if $level == 0;
+        $logcolor = "red" if $level == 1;
+        $logcolor = "green" if $level == 2;
+        $logcolor = "yellow" if $level == 3;
+        $logcolor = "blue" if $level == 4;
+        $logcolor = "magenta" if $level == 5;
+        $logcolor = "cyan" if $level == 6;
+        $logcolor = "white" if $level == 7;
+
+        my $message = "";
+
+        # $message = "$prompt ".color("bold $logcolor")."${package}::$name".color('reset')." $msg";
+        # $message = "$prompt ".color("bold $logcolor")."$name".color('reset').$blank.$msg;
+
+        # $message = colored("$prompt ", "bold $logcolor");
+        # $message = "$prompt ".color("bold $logcolor")."$name".color('reset').$blank;
+        if ($name) {
+            $message = sprintf("%s %s %s",
+                colored($prompt, "blue"),
+                colored($cmd,    "yellow"),
+                colored($name,   "cyan")
+            );
+        } else {
+            $message = sprintf("%s %s",
+                colored($prompt, "blue"),
+                colored($cmd,    "yellow")
+            );
+        }
+
+        if ($msg) {
+            $message .= " ... $msg";
+        }
+
+        # # left padding
+        # my $width_term = mob::get_width();
+        # my $width_text = length($message);
+        # my $width_blank = $width_term - $width_text;
+        # my $blank = " "x$width_blank;
+        # $message .= $blank if $width_blank;
+
+        print(STREAM "$message");
+
+        # print(STREAM "\033[K");  # clear the line
+        # print(STREAM "\r");
+        # print(STREAM "\033[F");  # move up
+        # print(STREAM "\033[2J");  # clear the screen
+        # print(STREAM "\033[H");   # move cursor to the top left
+    }
+    # }}}
+
+    # get the language {{{
+    sub get_syntax {
+        my $filename = $_[0];  # Replace with your file name
+        my $shebang;
+        open(my $fh, '<', $filename) or die "Could not open file '$filename' $!";
+        my $first_line = <$fh>;
+        $shebang = $first_line if $first_line =~ /^#!/;
+        chomp($shebang) if $shebang;
+        close($fh);
+        my $language;
+        if ($shebang) {
+            $language = (split("/", $shebang))[-1];
+            $language =~ s/env // if $language =~ /env /;
+            # print(STREAM "$shebang\n");
+        } else {
+            $language = `$highlighter -N $filename`;
+            chomp($language);
+        }
+        return $language;
+    }
+    # }}}
+
+    # shell wrapper {{{
+    sub shell {
+        my (@cmd) = @_;
+        my $stdin = undef; my $stdout; my $stderr = gensym;
+        my $pid = open3(
+            $stdin, $stdout, $stderr,
+            @cmd,
+        );
+        waitpid($pid, 0);
+        my $err = $? >> 8;
+        return $err;
+    }
+    # }}}
+
+}
 # }}}
 
 # workers {{{
+{
+    package job;
 
-# solid {{{
-sub imsolid {
-    my $subname = (split(":", (caller(0))[3]))[-1];
+    use POSIX qw(strftime);
+    use File::Path qw(remove_tree make_path);
 
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $width       = $opts->{width}      // '800';
-    my $height      = $opts->{height}     // '800';
-    my $background  = $opts->{background} // 'black';
-    my $output      = $opts->{output}     // '';
-    # }}}
+    *STREAM = *STDERR if $std_stream == 2;
+    *STREAM = *STDOUT if $std_stream == 1;
 
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+    # solid {{{
+    sub solid {
+        my $subname = (caller(0))[3];
 
-    # logger($subname, "missing file: output: $output: No such file or directory\n", 3) unless -f $output;
-    logger($subname, "output: $output: file exists. overwritting..\n", 2) if -f $output;
-    logger($subname, "No color image is specified, using default\n", 2) unless $background;
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $width       = $opts->{width}      // '800';
+        my $height      = $opts->{height}     // '800';
+        my $background  = $opts->{background} // 'black';
+        my $output      = $opts->{output}     // '';
+        # }}}
 
-    pretty("$subname", "${width}x${height}: $background > $output ");
-    my @exe = (
-        $runner,
-        "-size", "${width}x${height}",
-        "xc:$background",
-        $output,
-    );
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
 
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
+        # mob::log($subname, "missing file: output: $output: No such file or directory\n", 3) unless -f $output;
+        mob::log($subname, "output: $output: file exists. overwritting..\n", 2) if -f $output;
+        mob::log($subname, "No color image is specified, using default\n", 2) unless $background;
 
-# resize {{{
-sub imresize {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output = $opts->{output}       // '';
-    my %resolution = (
-        a => $opts->{resolution_a}     // '',
-        x => $opts->{resolution_x}     // '',
-        y => $opts->{resolution_y}     // '',
-    );
-    # }}}
-
-    my @input = split(",", $inputs);
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-    logger($subname, "No resolution is specified\n", 3) unless $resolution{a};
-    unless ($resolution{x}) {
-        $resolution{x} =~ s/x.*//;
-        logger($subname, "No x resolution\n", 2)
-    }
-    unless ($resolution{y}) {
-        $resolution{y} =~ s/.*x//;
-        logger($subname, "No y resolution\n", 2);
-    }
-
-    pretty("$subname", "$input[0] > $output ");
-    my @exe = (
-        $runner,
-            "-resize", "$resolution{a}^",
-            $input[0],
-            "-background", "none",
-            "-gravity", "center",
-            "-extent", "$resolution{a}^",
-        $output,
-    );
-
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-
-}
-# }}}
-
-# shadow {{{
-sub imshadow {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output = $opts->{output}       // '';
-    my %border = (
-        color => $opts->{border_color} // "none",
-        width => $opts->{border_width} // 0,
-    );
-    my %shadow = (
-        width => $opts->{shadow_width} // 110,
-        color => $opts->{shadow_color} // "black",
-        rate  => $opts->{shadow_rate}  // 10,
-        x     => $opts->{shadow_x}     // 1,
-        y     => $opts->{shadow_y}     // 1,
-    );
-    my $background_color = $opts->{background_color} // 'none';
-    # }}}
-
-    my @input = split(",", $inputs);
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-
-    pretty("$subname", "$input[0] > $output ");
-    my @exe = (
-        $runner,
-        $input[0],
-        "-bordercolor", $border{color},
-        "-border", $border{width}, '(',
-            "+clone", "-background",
-            $shadow{color}, "-shadow", "$shadow{width}x$shadow{rate}+$shadow{x}+$shadow{y}",
-        ')',
-        "+swap", "-background", ${background_color},
-        "-layers", "merge", "+repage",
-        $output,
-    );
-
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# alpha {{{
-sub imalpha {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}    // '';
-    my $output = $opts->{output}   // '';
-    my $color  = $opts->{color}    // 'white';
-    my $fuzz   = $opts->{fuzz}     // 99;
-    # }}}
-
-    my @input = split(",", $inputs);
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-
-    pretty("$subname", "$input[0] > $output ");
-    my @exe = (
-        $runner,
-        "-transparent", $color,
-        "-fuzz", "$fuzz\%",
-        $input[0],
-        $output,
-    );
-
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# trim {{{
-sub imtrim {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output = $opts->{output}       // '';
-    # }}}
-
-    my @input = split(",", $inputs);
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-
-    pretty("$subname", "$input[0] > $output ");
-    my @exe = (
-        $runner,
-        $input[0],
-        "-trim",
-        $output,
-    );
-
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# append {{{
-sub imappend {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs     = $opts->{input}        // '';
-    my $output     = $opts->{output}       // '';
-    my $vertical   = $opts->{vertical}     // 1;
-    my $horizontal = $opts->{horizontal}   // 0;
-    # }}}
-
-    my @input = split(",", $inputs);
-
-    my $append;
-    if ($horizontal) {
-        $append = "+append";
-        $vertical = 0;
-    }
-    if ($vertical) {
-        $append = "-append";
-        $horizontal = 0;
-    }
-
-    # what would you want me to say here!?
-    if ($vertical && $horizontal) {
-        logger($subname, "What? vertical AND horizontal append?! make up your mind!\n", 2);
-        logger($subname, "btw, How on earth did you manage to trigger this?! I ~~have~~ had a fail safe!\n", 3);
-    }
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-
-    pretty("$subname", "$input[0] > $output ");
-    my @exe = (
-        $runner,
-        $append,
-    );
-    foreach my $image (@input) {
-        push(@exe, $image);
-    }
-    push(@exe, $output);
-
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# blur {{{
-sub imblur {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output = $opts->{output}       // '';
-    my $blur   = $opts->{blur}         // 4;
-    my $rate   = $opts->{rate}         // 2;
-    my $scale  = $opts->{scale}        // 4;
-    my $geo    = $opts->{geo}          // 0;
-    # }}}
-
-    my @input = split(",", $inputs);
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-
-    pretty("$subname", "$input[0] > $output ");
-    my $format = "\%[fx:w+((w+h)/${scale}*0.1)]x\%[fx:h+((w+h)/${scale}*0.1)]";
-    $geo = `$identify -format "$format" "@{input}"` unless $geo;
-
-    my @exe = (
-        $runner,
-        "-resize", "$blur\%",
-        $input[0],
-        "-gaussian-blur", "1x${rate}",
-        "-resize", "${geo}^",
-        "-extent", "${geo}",
-        $output,
-    );
-
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# crop {{{
-sub imcrop {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output = $opts->{output}       // '';
-    my $round  = $opts->{round}        // 25;
-    my $shape  = $opts->{shape}        // 'square';
-    # }}}
-
-    my @input = split(",", $inputs);
-    my $sqrp = $round;
-
-    my $x = `$identify -format '\%w' $input[0]`;
-    my $y = `$identify -format '\%h' $input[0]`;
-    my $xmid = $x // 2;
-    my $ymid = $y // 2;
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-
-    pretty("$subname", "$input[0] > $output ");
-    my @exe;
-    if ($shape eq "circle") {
-        @exe = (
+        mob::pretty($subname, "create solid color image");
+        my @exe = (
             $runner,
-            $input[0],
-            "\(",
-                "+clone",
-                "-size", "${x}x${y}",
-                "-threshold", "100\%",
-                "-fill", "white",
-                "-draw", "roundrectangle 0,0 ${x},${y} ${xmid},${ymid}",
-            "\)",
-            "-alpha", "off",
-            "-compose", "CopyOpacity",
-            "-composite",
-            $output,
-        );
-    } else {
-        @exe = (
-            $runner,
-            $input[0],
-            "\(",
-                "+clone",
-                "-threshold", "100\%",
-                "-fill", "white",
-                "-draw", "roundrectangle 0,0 ${x},${y} ${sqrp},${sqrp}",
-            "\)",
-            "-alpha", "off",
-            "-compose", "CopyOpacity",
-            "-composite",
-            $output,
-        );
-    }
-
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# color {{{
-sub imcolor {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output  = $opts->{output}       // '';
-    my $find    = $opts->{find}         // '';
-    my $replace = $opts->{replace}      // '';
-    my $percent = $opts->{percent}      // 55;
-    # }}}
-
-    my @input = split(",", $inputs);
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-    logger($subname, "No color is specified to find\n", 3) unless $find;
-    logger($subname, "No color is specified to replace\n", 3) unless $replace;
-
-    pretty("$subname", "$input[0] > $output ");
-    my @exe = (
-        $runner,
-        $input[0],
-        "-fuzz",   "$percent\%",
-        "-fill",   "$find\%",
-        "-opaque", "$replace\%",
-        $output,
-    );
-
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# merge {{{
-sub immerge {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output = $opts->{output}       // '';
-    my $fade   = $opts->{fade}         // '';
-    # }}}
-
-    my @input = split(",", $inputs);
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-
-    my @fader = ("-blend", "$fade") if $fade;
-
-    pretty("$subname", "@input > $output ");
-    my @exe = (
-        $composite,
-            @input,
             "-channel", "RGBA",
-            @fader,
-            "-gravity", "Center",
-            "-alpha", "set",
-            ${output}
-    );
+            "-size", "${width}x${height}",
+            "xc:$background",
+            $output,
+        );
 
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# gradient {{{
-sub imgradient {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output = $opts->{output}       // '';
-    my $mirror = $opts->{mirror}       // 0;
-    my $rotate = $opts->{rotate}       // 0;
-    my $orientation = $opts->{orientation} // 'vertical';
-    my %color = (
-        first       => $opts->{color_first}       // '#770000',
-        second      => $opts->{color_second}      // '#ff7700',
-        background  => $opts->{color_background}  // 'none',
-    );
-    my %shadow = (
-        apply  => $opts->{shadow_apply}  // 1,
-        double => $opts->{shadow_double} // 0,
-        color  => $opts->{shadow_color}  // 'black',
-        width  => $opts->{shadow_width}  // 110,
-        rate   => $opts->{shadow_rate}   // 10,
-    );
-    my %border = (
-        color  => $opts->{border_color}  // 'none',
-        width  => $opts->{border_width}  // 0,
-        rate   => $opts->{border_rate}   // 290,
-    );
-    my %position = (
-        x  => $opts->{position_x}  // 1,
-        y  => $opts->{position_y}  // 1,
-    );
-    my %res = (
-        x => $opts->{x}  // 0,
-        y => $opts->{y}  // 0,
-    );
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+    }
     # }}}
 
-    my @input = split(",", $inputs);
+    # resize {{{
+    sub resize {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
 
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}        // '';
+        my $output = $opts->{output}       // '';
+        my %resolution = (
+            a => $opts->{resolution_a}     // '',
+            x => $opts->{resolution_x}     // '',
+            y => $opts->{resolution_y}     // '',
+        );
+        # }}}
 
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    # logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    # logger($subname, "missing file: input: $input[0]: No such file or directory\n", 2) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
+        my @input = split(",", $inputs);
 
-    my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
-    my $tmpfile = "$tmpdir/imagemagick-tmp-gradient.png";
-    make_path($tmpdir);
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
 
-    my $resolution   = `$identify -format '%wx%h' $input[0]`;
-    my ($resolution_x, $resolution_y);
-    if ($res{x}) {
-        $resolution_x = $res{x};
-    } else {
-        $resolution_x = `$identify -format '%w' $input[0]` + $border{rate};
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+        mob::log($subname, "No resolution is specified\n", 3) unless $resolution{a};
+        unless ($resolution{x}) {
+            $resolution{x} =~ s/x.*//;
+            mob::log($subname, "No x resolution\n", 2)
+        }
+        unless ($resolution{y}) {
+            $resolution{y} =~ s/.*x//;
+            mob::log($subname, "No y resolution\n", 2);
+        }
+
+        mob::pretty($subname, "resize image");
+        my @exe = (
+            $runner,
+                "-resize", "$resolution{a}^",
+                $input[0],
+                "-background", "none",
+                "-gravity", "center",
+                "-extent", "$resolution{a}^",
+            $output,
+        );
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+
     }
-    if ($res{y}) {
-        $resolution_y = $res{y};
-    } else {
-        $resolution_y = `$identify -format '%h' $input[0]` + $border{rate};
+    # }}}
+
+    # shadow {{{
+    sub shadow {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}        // '';
+        my $output = $opts->{output}       // '';
+        my %border = (
+            color => $opts->{border_color} // "none",
+            width => $opts->{border_width} // 0,
+        );
+        my %shadow = (
+            width => $opts->{shadow_width} // 110,
+            color => $opts->{shadow_color} // "black",
+            rate  => $opts->{shadow_rate}  // 10,
+            x     => $opts->{shadow_x}     // 1,
+            y     => $opts->{shadow_y}     // 1,
+        );
+        my $background_color = $opts->{background_color} // 'none';
+        # }}}
+
+        my @input = split(",", $inputs);
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+
+        mob::pretty($subname, "add shadow border");
+        my @exe = (
+            $runner,
+            $input[0],
+            "-bordercolor", $border{color},
+            "-border", $border{width}, '(',
+                "+clone", "-background",
+                $shadow{color}, "-shadow", "$shadow{width}x$shadow{rate}+$shadow{x}+$shadow{y}",
+            ')',
+            "+swap", "-background", ${background_color},
+            "-layers", "merge", "+repage",
+            $output,
+        );
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
     }
+    # }}}
 
-    ($color{first}, $color{second}) = ($color{second}, $color{first}) if $mirror;
+    # alpha {{{
+    sub alpha {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
 
-    my $rotation = $rotate;
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}    // '';
+        my $output = $opts->{output}   // '';
+        my $color  = $opts->{color}    // 'white';
+        my $fuzz   = $opts->{fuzz}     // 99;
+        # }}}
 
-    my $gradient_orientation;
-    $gradient_orientation = "gradient:$color{first}-$color{second}" if $orientation eq "vertical";
-    $gradient_orientation = "gradient:$color{first}|$color{second}" if $orientation eq "horizontal";
-    $gradient_orientation = "radial-gradient:$color{first}-$color{second}" if $orientation eq "radial";
-    $gradient_orientation = "plasma:$color{first}-$color{second}" if $orientation eq "plasma";
+        my @input = split(",", $inputs);
 
-    my $diag = int( sqrt($resolution_x**2 + $resolution_y**2) + 0.5 );
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
 
-    pretty("$subname", "$input[0] > $output ");
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
 
-    $gradient_orientation = "gradient:$color{first}-$color{second}";
+        mob::pretty($subname, "make color transparent");
+        my @exe = (
+            $runner,
+            "-transparent", $color,
+            "-fuzz", "$fuzz\%",
+            $input[0],
+            $output,
+        );
 
-    # # tile {{{
-    # my @exe = (
-    #     $runner,
-    #     "xc:",
-    #     '-size', "${resolution_x}x${resolution_y}",
-    #     $gradient_orientation,
-    #     '-virtual-pixel', 'tile',
-    #     '-distort', 'SRT', $rotation,
-    #     '-bordercolor', $border{color},
-    #     '-border', $border{width},
-    #     '+swap',
-    #     '-background', $color{background},
-    #     '-layers', 'merge',
-    #     '+repage',
-    #     $tmpfile,
-    # );
-    # # }}}
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+    }
+    # }}}
 
-    my @exe = (
-        $runner,
-        "-size", "${resolution_x}x${resolution_y}",
-        "gradient:$color{first}-$color{second}",
-        "-distort", "SRT", $rotation,
-        "xc:",
-        "-bordercolor", $border{color},
-        "-border", $border{width},
-        "+swap",
-        "-background", $color{background},
-        "-layers", "merge",
-        "+repage",
-        $tmpfile,
-    );
+    # trim {{{
+    sub trim {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
 
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}        // '';
+        my $output = $opts->{output}       // '';
+        # }}}
 
-    if ($shadow{apply}) {
-        imshadow({
-            input => $input[0],
-            output => $output,
-            shadow_rate => 5,
-            shadow_width => 20,
-            background_color => 'none'
-        }); clean();
-        if ($shadow{double}) {
-            imshadow({
-                input => $output,
+        my @input = split(",", $inputs);
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+
+        mob::pretty($subname, "remove extra color");
+        my @exe = (
+            $runner,
+            $input[0],
+            "-trim",
+            $output,
+        );
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+    }
+    # }}}
+
+    # append {{{
+    sub append {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs     = $opts->{input}        // '';
+        my $output     = $opts->{output}       // '';
+        my $background = $opts->{background}   // 'none';
+        my $vertical   = $opts->{vertical}     // 1;
+        my $horizontal = $opts->{horizontal}   // 0;
+        my $position   = $opts->{position}     // "left";
+        # }}}
+
+        my @input = split(",", $inputs);
+
+        my $append;
+        if ($horizontal) {
+            $append = "+append";
+            $vertical = 0;
+        }
+        if ($vertical) {
+            $append = "-append";
+            $horizontal = 0;
+        }
+
+        # what would you want me to say here!?
+        if ($vertical && $horizontal) {
+            mob::log($subname, "What? vertical AND horizontal append?! make up your mind!\n", 2);
+            mob::log($subname, "btw, How on earth did you manage to trigger this?! I ~~have~~ had a fail safe!\n", 3);
+        }
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+
+        mob::pretty($subname, "append images");
+        my @exe = (
+            $runner,
+            $append,
+            "-background", $background
+        );
+        if ($position) {
+            my @positions = split /[, ]+/, $position;
+            my $pos = "";
+            my $h = "";
+            foreach my $p (@positions) {
+                if (($pos =~ /[lL]eft/ && $p =~ /[rR]ight/) || ($pos =~ /[rR]ight/ && $p =~ /[lL]left/)) {
+                    $p = "center";
+                }
+                # $h = " " unless $pos ne "";
+                $pos .= "${h}West" if $p =~ /[Ll]eft/;
+                $pos .= "${h}East" if $p =~ /[Rr]ight/;
+                $pos .= "${h}North" if $p =~ /[Tt]op/;
+                $pos .= "${h}South" if $p =~ /[Bb]ottom/;
+                $pos .= "${h}Center" if $p =~ /[Cc]enter/;
+            }
+            push @exe, ("-gravity", $pos);
+        }
+        foreach my $image (@input) {
+            push(@exe, $image);
+        }
+        push(@exe, $output);
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+    }
+    # }}}
+
+    # blur {{{
+    sub blur {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}        // '';
+        my $output = $opts->{output}       // '';
+        my $blur   = $opts->{blur}         // 2;
+        my $rate   = $opts->{rate}         // 1;
+        my $scale  = $opts->{scale}        // 2;
+        my $geo    = $opts->{geo}          // 0;
+        # }}}
+
+        my @input = split(",", $inputs);
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+
+        mob::pretty($subname, "blur image");
+        my $format = "\%[fx:w+((w+h)/${scale}*0.1)]x\%[fx:h+((w+h)/${scale}*0.1)]";
+        $geo = `$identify -format "$format" "@{input}"` unless $geo;
+
+        my @exe = (
+            $runner,
+            "-resize", "$blur\%",
+            $input[0],
+            "-gaussian-blur", "1x${rate}",
+            "-resize", "${geo}^",
+            "-extent", "${geo}",
+            $output,
+        );
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+    }
+    # }}}
+
+    # pixel {{{
+    sub pixel {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs     = $opts->{input}    // '';
+        my $output     = $opts->{output}   // '';
+        my $rate_down  = $opts->{rate}     // 20;
+        # }}}
+
+        my $rate_up = 10000 / $rate_down;
+
+        my @input = split(",", $inputs);
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+
+        mob::pretty($subname, "pixelate image");
+        my @exe = (
+            $runner,
+            "@input",
+            "-scale", sprintf("%s%%", ${rate_down}),
+            "-scale", sprintf("%s%%", ${rate_up}),
+            $output,
+        );
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+    }
+    # }}}
+
+    # crop {{{
+    sub crop {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}        // '';
+        my $output = $opts->{output}       // '';
+        my $round  = $opts->{round}        // 25;
+        my $shape  = $opts->{shape}        // 'square';
+        # }}}
+
+        my @input = split(",", $inputs);
+        my $sqrp = $round;
+
+        my $x = `$identify -format '\%w' $input[0]`;
+        my $y = `$identify -format '\%h' $input[0]`;
+        my $xmid = $x // 2;
+        my $ymid = $y // 2;
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+
+        mob::pretty($subname, "crop image");
+        my @exe;
+        if ($shape eq "circle") {
+            @exe = (
+                $runner,
+                $input[0],
+                "\(",
+                    "+clone",
+                    "-size", "${x}x${y}",
+                    "-threshold", "100\%",
+                    "-fill", "white",
+                    "-draw", "roundrectangle 0,0 ${x},${y} ${xmid},${ymid}",
+                "\)",
+                "-alpha", "off",
+                "-compose", "CopyOpacity",
+                "-composite",
+                $output,
+            );
+        } else {
+            @exe = (
+                $runner,
+                $input[0],
+                "\(",
+                    "+clone",
+                    "-threshold", "100\%",
+                    "-fill", "white",
+                    "-draw", "roundrectangle 0,0 ${x},${y} ${sqrp},${sqrp}",
+                "\)",
+                "-alpha", "off",
+                "-compose", "CopyOpacity",
+                "-composite",
+                $output,
+            );
+        }
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+    }
+    # }}}
+
+    # blend {{{
+    sub blend {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs  = $opts->{input}   // '';
+        my $output  = $opts->{output}  // '';
+        my $color   = $opts->{color}   // 'black';
+        my $rate    = $opts->{rate}    // "60";
+        # }}}
+
+        my @input = split(",", $inputs);
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+        mob::log($subname, "No color is specified to blend\n", 3) unless $color;
+
+        mob::pretty($subname, "blend color to another");
+        my @exe = (
+            $runner,
+            $input[0],
+            "-fill", "$color",
+            "-colorize", "$rate\%",
+            $output,
+        );
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+    }
+    # }}}
+
+    # color {{{
+    sub color {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}        // '';
+        my $output  = $opts->{output}       // '';
+        my $find    = $opts->{find}         // '';
+        my $replace = $opts->{replace}      // '';
+        my $percent = $opts->{percent}      // 55;
+        # }}}
+
+        my @input = split(",", $inputs);
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+        mob::log($subname, "No color is specified to find\n", 3) unless $find;
+        mob::log($subname, "No color is specified to replace\n", 3) unless $replace;
+
+        mob::pretty($subname, "replace color to another");
+        my @exe = (
+            $runner,
+            $input[0],
+            "-fuzz",   "$percent\%",
+            "-fill",   "$find\%",
+            "-opaque", "$replace\%",
+            $output,
+        );
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+    }
+    # }}}
+
+    # merge {{{
+    sub merge {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}        // '';
+        my $output = $opts->{output}       // '';
+        my $fade   = $opts->{fade}         // '';
+        # }}}
+
+        my @input = split(",", $inputs);
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+
+        my @fader = ();
+        @fader = ("-blend", "$fade") if $fade;
+
+        mob::pretty($subname, "merge images over each other");
+        my @exe = (
+            # $composite,
+            "magick",
+                "composite",
+                "-compose", "Over",
+                @input,
+                "-colorspace", "sRGB",
+                # "-channel", "RGBA",
+                @fader,
+                "-gravity", "Center",
+                # "-alpha", "set",
+                ${output}
+        );
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+    }
+    # }}}
+
+    # gradient {{{
+    sub gradient {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}        // '';
+        my $output = $opts->{output}       // '';
+        my $mirror = $opts->{mirror}       // 0;
+        my $rotate = $opts->{rotate}       // 0;
+        my $orientation = $opts->{orientation} // 'vertical';
+        my %color = (
+            first       => $opts->{color_first}       // '#770000',
+            second      => $opts->{color_second}      // '#ff7700',
+            background  => $opts->{color_background}  // 'none',
+        );
+        my %shadow = (
+            apply  => $opts->{shadow_apply}  // 1,
+            double => $opts->{shadow_double} // 0,
+            color  => $opts->{shadow_color}  // 'black',
+            width  => $opts->{shadow_width}  // 110,
+            rate   => $opts->{shadow_rate}   // 10,
+        );
+        my %border = (
+            color  => $opts->{border_color}  // 'none',
+            width  => $opts->{border_width}  // 0,
+            rate   => $opts->{border_rate}   // 290,
+        );
+        my %position = (
+            x  => $opts->{position_x}  // 1,
+            y  => $opts->{position_y}  // 1,
+        );
+        my %res = (
+            x => $opts->{x}  // 0,
+            y => $opts->{y}  // 0,
+        );
+        # }}}
+
+        my @input = split(",", $inputs);
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        # mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        # mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 2) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+
+        my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
+        my $tmpfile = "$tmpdir/imagemagick-tmp-gradient.png";
+        make_path($tmpdir);
+
+        my $resolution   = `$identify -format '%wx%h' $input[0]`;
+        my ($resolution_x, $resolution_y);
+        if ($res{x}) {
+            $resolution_x = $res{x};
+        } else {
+            $resolution_x = `$identify -format '%w' $input[0]` + $border{rate};
+        }
+        if ($res{y}) {
+            $resolution_y = $res{y};
+        } else {
+            $resolution_y = `$identify -format '%h' $input[0]` + $border{rate};
+        }
+
+        ($color{first}, $color{second}) = ($color{second}, $color{first}) if $mirror;
+
+        my $rotation = $rotate;
+
+        my $gradient_orientation;
+        $gradient_orientation = "gradient:$color{first}-$color{second}" if $orientation eq "vertical";
+        $gradient_orientation = "gradient:$color{first}|$color{second}" if $orientation eq "horizontal";
+        $gradient_orientation = "radial-gradient:$color{first}-$color{second}" if $orientation eq "radial";
+        $gradient_orientation = "plasma:$color{first}-$color{second}" if $orientation eq "plasma";
+
+        my $diag = int( sqrt($resolution_x**2 + $resolution_y**2) + 0.5 );
+
+        mob::pretty($subname, "create gradient");
+
+        $gradient_orientation = "gradient:$color{first}-$color{second}";
+
+        # # tile {{{
+        # my @exe = (
+        #     $runner,
+        #     "xc:",
+        #     '-size', "${resolution_x}x${resolution_y}",
+        #     $gradient_orientation,
+        #     '-virtual-pixel', 'tile',
+        #     '-distort', 'SRT', $rotation,
+        #     '-bordercolor', $border{color},
+        #     '-border', $border{width},
+        #     '+swap',
+        #     '-background', $color{background},
+        #     '-layers', 'merge',
+        #     '+repage',
+        #     $tmpfile,
+        # );
+        # # }}}
+
+        my @exe = (
+            $runner,
+            "-size", "${resolution_x}x${resolution_y}",
+            "gradient:$color{first}-$color{second}",
+            "-distort", "SRT", $rotation,
+            "xc:",
+            "-bordercolor", $border{color},
+            "-border", $border{width},
+            "+swap",
+            "-background", $color{background},
+            "-layers", "merge",
+            "+repage",
+            $tmpfile,
+        );
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+
+        if ($shadow{apply}) {
+            job::shadow({
+                input => $input[0],
                 output => $output,
                 shadow_rate => 5,
                 shadow_width => 20,
                 background_color => 'none'
-            }); clean();
+            }); mob::clean();
+            if ($shadow{double}) {
+                job::shadow({
+                    input => $output,
+                    output => $output,
+                    shadow_rate => 5,
+                    shadow_width => 20,
+                    background_color => 'none'
+                }); mob::clean();
+            }
         }
-    }
-    immerge({input => "${output},$tmpfile", output => $output}); clean();
+        job::merge({input => "${output},$tmpfile", output => $output}); mob::clean();
 
-    pretty($subname, "remove $tmpdir ");
-    remove_tree($tmpdir, {error => \my $err});
-    if (@$err) {
-        foreach my $diag (@$err) {
-            print(STREAM check_exit_code($?));
-            logger($subname, "Failed to remove $diag->[0]: $diag->[1]\n", 2);
+        mob::pretty($subname, "remove $tmpdir");
+        remove_tree($tmpdir, {error => \my $err});
+        if (@$err) {
+            foreach my $diag (@$err) {
+                print(STREAM mob::check_exit_code($?));
+                print "\n";
+                mob::log($subname, "Failed to remove $diag->[0]: $diag->[1]\n", 2);
+            }
+        } else {
+            print(STREAM mob::check_exit_code($?));
+            mob::pretty($subname, "remove $tmpdir");
+            print "\n";
         }
-    } else {
-        # pretty("$subname", "remove $tmpdir");
-        print(STREAM check_exit_code($?));
+
     }
-
-}
-# }}}
-
-# negate {{{
-sub imnegate {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output = $opts->{output}       // '';
     # }}}
 
-    my @input = split(",", $inputs);
+    # negate {{{
+    sub negate {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
 
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}        // '';
+        my $output = $opts->{output}       // '';
+        # }}}
 
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
+        my @input = split(",", $inputs);
 
-    pretty("$subname", "$input[0] > $output ");
-    my @exe = (
-        $runner,
-        $input[0],
-        "-channel", "RGB", "-negate",
-        $output,
-    );
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
 
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
 
-# round {{{
-sub imround {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output = $opts->{output}       // '';
-    my $round  = $opts->{round}        // 25;
-    # }}}
-
-    my @input = split(",", $inputs);
-    my $sqrp = $round;
-
-    my $x = `$identify -format '\%w' $input[0]`;
-    my $y = `$identify -format '\%h' $input[0]`;
-    my $xmid = $x // 2;
-    my $ymid = $y // 2;
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-
-    pretty("$subname", "$input[0] > $output ");
-    my @exe = (
-        $runner,
-        $input[0], "\(",
-            "+clone", "-alpha", "extract",
-            "-draw", "fill black polygon 0,0 0,15 15,0 fill white circle 15,15 15,0", "\(",
-                "+clone", "-flip",
-            "\)",
-            "-compose", "Multiply", "-composite", "\(",
-                "+clone", "-flop",
-            "\)",
-            "-compose", "Multiply", "-composite",
-        "\)",
-        "-alpha", "off", "-compose", "CopyOpacity", "-composite",
-        $output,
-    );
-
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# shot -- WIP {{{
-# TODO: bring the dmenu-shot here
-sub imshot {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}        // '';
-    my $output = $opts->{output}       // '';
-    # }}}
-
-    my @input = split(",", $inputs);
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    my $shot_directory = "${home}/pictures/screenshots";
-    make_path($shot_directory) unless -d $shot_directory;
-
-    pretty("$subname", " $output ");
-    my @exe = (
-        $runner,
-        "-trim",
-        $input[0],
-        $output,
-    );
-
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# title {{{
-sub imtitle {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs   = $opts->{input}    // '';
-    my $output   = $opts->{output}   // '';
-	my $window   = $opts->{window}   // 1;;
-	my $title    = $opts->{title}    // 'Source Code';;
-    my $font     = $opts->{font}     // $default{font}{sans};;
-    my $vertical = $opts->{vertical} // '-0';;
-    my $size     = $opts->{size}     // $default{font}{size};;
-    my %color = (
-        background => $opts->{color_background} // $default{color}{background},
-        temperory  => $opts->{color_temperory}  // $default{color}{temperory},
-        foreground => $opts->{color_foreground} // $default{color}{foreground},
-        button => {
-            close => $opts->{color_button_close} // '#ff5f56', # '#9999A0',
-            maxim => $opts->{color_button_maxim} // '#5fc451', # '#9999A0',
-            minim => $opts->{color_button_minim} // '#ffbd2e', # '#9999A0',
-        },
-    );
-    my %border = (
-        rate => 20,
-    );
-    # }}}
-
-    my @input = split(",", $inputs);
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-
-    my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
-    my $tmpfile_title_bar = "$tmpdir/imagemagick-tmp-title-bar.png";
-    my $tmpfile_title_button = "$tmpdir/imagemagick-tmp-title-button.png";
-    make_path($tmpdir);
-
-    my %resolution = (
-        a => `$identify -format '%wx%h' $input[0]`,
-        x => `$identify -format '%w' $input[0]`,
-        y => `$identify -format '%h' $input[0]`,
-    );
-    my %resolution_out = (
-        x => $resolution{x} + $border{rate},
-        y => $resolution{y} + $border{rate},
-    );
-
-    my $width = $resolution{x};
-    my $height = $border{rate} + $border{rate};
-
-    my $_tmpfile_title_button = (split("/", $tmpfile_title_button))[-1];
-    my $_tmpfile_title_bar    = (split("/", $tmpfile_title_bar))[-1];
-
-    pretty($subname, "$input[0] > $_tmpfile_title_bar ");
-    my @exe = (
-        $runner,
-        "-size", "${width}x$height",
-        "gradient:$color{temperory}-$color{background}",
-        "-font", $font,
-        "-pointsize", $size,
-        "-fill", $color{foreground},
-        "-gravity", "center",
-        "-annotate", "+000$vertical", $title,
-        $tmpfile_title_bar,
-    );
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-
-    pretty($subname, "$_tmpfile_title_bar > $_tmpfile_title_button ");
-    @exe = (
-        $runner,
-            $tmpfile_title_bar,
-            "-fill", $color{button}{close}, "-draw", "circle 20,19 27,19",
-            "-fill", $color{button}{minim}, "-draw", "circle 44,19 51,19",
-            "-fill", $color{button}{maxim}, "-draw", "circle 68,19 75,19",
-            $tmpfile_title_button,
-    );
-    $_exit_code = shell(@exe);
-    $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-
-    logger($subname, "missing file: $tmpfile_title_button\n", 3) unless -f $tmpfile_title_button;
-    logger($subname, "missing file: $tmpfile_title_bar\n", 3) unless -f $tmpfile_title_bar;
-
-    imappend({input => "$tmpfile_title_button,$input[0]", output => $output, vertical => 1});
-    clean();
-
-    pretty($subname, "remove $tmpdir ");
-    remove_tree($tmpdir, {error => \my $err});
-    if (@$err) {
-        foreach my $diag (@$err) {
-            print(STREAM check_exit_code($?));
-            logger($subname, "Failed to remove $diag->[0]: $diag->[1]\n", 2);
-        }
-    } else {
-        # pretty("$subname", "remove $tmpdir");
-        print(STREAM check_exit_code($?));
-    }
-
-    pretty("$subname", "$input[0] > $output ");
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# extend {{{
-sub imextend {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs   = $opts->{input}        // '';
-    my $output   = $opts->{output}       // '';
-    my $mirror   = $opts->{mirror}       // 0;
-    my $gradient = $opts->{gradient}     // 0;
-    my %color  = (
-        background => $opts->{color_background} // $default{color}{background},
-        temperory  => $opts->{color_temperory}  // $default{color}{temperory},
-        border     => $opts->{color_border}     // $default{color}{border},
-    );
-    my $rate   = $opts->{rate}  // 2;
-    my %shadow = (
-        width => $opts->{shadow_width} // 0,
-        color => $opts->{shadow_color} // "black",
-        rate  => $opts->{shadow_rate}  // 0,
-    );
-    my %offset = (
-        x     => 0,
-        y     => 0,
-    );
-    my $background_color = $opts->{background_color} // $default{color}{background};
-    # }}}
-
-    my @input = split(",", $inputs);
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    # logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-
-    my $x = `$identify -format '\%w' $input[0]`;
-    my $y = `$identify -format '\%h' $input[0]`;
-    my $W = $x + $rate;
-    my $H = $y + $rate;
-
-    ($color{background}, $color{temperory}) = ($color{temperory}, $color{background}) if $mirror;
-
-    pretty("$subname", "$input[0] > $output ");
-    my @exe;
-    unless ($gradient) {
-        $color{temperory} = $color{background};
-    }
-    @exe = (
-        $runner,
-        '(',
-            '-size', "${W}x${H}",
-            "gradient:$color{background}-$color{temperory}",
-        ')',
-        '(',
+        mob::pretty($subname, "negate color");
+        my @exe = (
+            $runner,
             $input[0],
-            '(',
-                '+clone',
-                '-background', $shadow{color},
-                '-shadow', "$shadow{width}x$shadow{rate}+$offset{x}+$offset{y}",
-            ')',
-            '+swap',
-            '-background', 'none',
-            '-layers', 'merge',
-        ')',
-        '-gravity', 'center',
-        '-compose', 'over',
-        '-composite',
-        $output,
-    );
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# src {{{
-sub imsrc {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs     = $opts->{input}      // '';
-    my $output     = $opts->{output}     // '';
-    my $language   = $opts->{language}   // '';
-    my $linenumber = $opts->{linenumber} // 0;
-    my $theme      = $opts->{theme}      // 'gruvbox-dark';
-    my %font = (
-        name => $opts->{font_name} // $default{font}{mono},
-        size => $opts->{font_size} // $default{font}{size},
-    );
-    my %frame = (
-        title => $opts->{frame_title} // 'Source Code',
-    );
-    my $round  = $opts->{round}          // 5;
-    my %shadow = (
-        apply  => $opts->{shadow_apply}  // 0,
-        color  => $opts->{shadow_color}  // 'black',
-        width  => $opts->{shadow_width}  // 110,
-        rate   => $opts->{shadow_rate}   // 10,
-    );
-    my %color = (
-        border     => $opts->{color_border}     // $default{color}{border},
-        frame      => $opts->{color_frame}      // $default{color}{frame},
-        background => $opts->{color_background} // $default{color}{background},
-        foreground => $opts->{color_foreground} // $default{color}{foreground},
-        gradient   => {
-            first  => $opts->{color_gradient_first}  // '#9F8F6D',
-            second => $opts->{color_gradient_second} // '#6F8B88',
-        },
-    );
-    my %alpha = (
-        apply       => $opts->{alpha_apply} // 1,
-        width       => $opts->{alpha_width} // 20,
-    );
-    my %border = (
-        width       => $opts->{border_width} // 25,
-    );
-    my %gradient = (
-        apply  => $opts->{gradient_apply}    // 1,
-        mirror => $opts->{gradient_mirror}   // 0,
-        rotate => $opts->{gradient_rotate}   // 0,
-        width  => $opts->{gradient_width}    // 100,
-        height => $opts->{gradient_height}   // 160,
-        orientation => $opts->{gradient_orientation} // "vertical",
-    );
-    # }}}
-
-    my @input = split(",", $inputs);
-
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
-
-    my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
-    my $tmpfile_nl = "$tmpdir/imagemagick-tmp-nl.txt";
-    my $tmpfile_pango = "$tmpdir/imagemagick-tmp-pango.xml";
-    my $tmpfile_image = "$tmpdir/imagemagick-tmp-image.png";
-    make_path($tmpdir);
-
-    # add line numbering to the src image
-    if ($linenumber) {
-        my @job_add_line_number = (
-            "nl", "-b", "a", $input[0]
+            "-channel", "RGB", "-negate",
+            $output,
         );
-        open my $output_fh, '>', $tmpfile_nl or die "Could not open '$tmpfile_nl': $!";
-        open my $nl_fh, '-|', @job_add_line_number or die "Could not execute nl: $!";
-        while (my $line = <$nl_fh>) {
-            print $output_fh $line;
-        }
-        close $nl_fh;
-        close $output_fh;
-    } else {
-        $tmpfile_nl = $input[0];
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
     }
-
-    # get the language for syntax highlighting
-    $language = get_syntax($input[0]) unless $language;
-
-    # generate pango
-    pretty("$subname", "$input[0] > $tmpfile_pango ");
-    my @exe = (
-        $highlighter,
-            $tmpfile_nl,
-            "-O", "style=$theme",
-            "-O", "bgcolor=base03",
-            "-f", "pango",
-            "-o", $tmpfile_pango
-    );
-    push(@exe, ("-l", $language)) if $language;
-    my $_exit_code = shell(@exe);
-    my $exit_code = $_exit_code >> 8;
-    check_exit_code($exit_code);
-
-    # generate image
-    pretty("$subname", "$tmpfile_pango > $tmpfile_image ");
-    @exe = (
-        $runner,
-        "-background", $color{background},
-        "-pointsize", $font{size},
-        "pango:\@$tmpfile_pango",
-        $tmpfile_image,
-    );
-    $_exit_code = shell(@exe);
-    $exit_code = $_exit_code >> 8;
-    check_exit_code($exit_code);
-
-    # extra filters and visual effects
-    imtrim({input => $tmpfile_image, output => $output}); clean();
-    imshadow({
-        input => $output,
-        output => $output,
-        shadow_width => 0,
-        shadow_rate  => 0,
-        border_width => $border{width},
-        border_color => '#151515',
-        background_color => 'none',
-    }); clean();
-    imtrim({input => $output, output => $output}); clean();
-    imtitle({input => $output, output => $output, frame_title => $frame{title}, background_color => $color{background}}); clean();
-    imround({input => $output, output => $output, round => $round}); clean();
-    imextend({input => $output, output => $output, rate => 2}); clean();
-    imround({input => $output, output => $output, round => $round}); clean();
-    imextend({input => $output, output => $output, rate => 2, mirror => 1}); clean();
-    imround({input => $output, output => $output, round => $round}); clean();
-    imextend({input => $output, output => $output, rate => 2}); clean();
-    imround({input => $output, output => $output, round => $round}); clean();
-    # imextend({input => $output, output => $output, rate => 1, mirror => 1}); clean();
-    # imround({input => $output, output => $output, round => $round}); clean();
-    if ($alpha{apply}) {
-        imextend({input => $output, output => $output, rate => $alpha{width}, gradient => 0, color_background => 'none'}); clean();
-    }
-    if ($shadow{apply}) {
-        imshadow({
-            input => $output,
-            output => $output,
-            shadow_width => $shadow{width},
-            shadow_rate  => $shadow{rate},
-            shadow_color => $shadow{color},
-            border_width => 10,
-        }); clean();
-    }
-    if ($shadow{apply}) {
-        imshadow({
-            input => $output,
-            output => $output,
-            shadow_width => $shadow{width},
-            shadow_rate  => $shadow{rate} * 10,
-            shadow_color => $shadow{color},
-            border_width => 10,
-        }); clean();
-    }
-    if ($gradient{apply}) {
-        imgradient({
-            input => $output,
-            output => $output,
-            color_first => $color{gradient}{first},
-            color_second => $color{gradient}{second},
-            gradient_width => "",
-            gradient_height => "",
-            mirror => $gradient{mirror},
-            rotate => $gradient{rotate},
-            orientation => $gradient{orientation},
-        }); clean();
-    }
-
-    # clean up the mess
-    pretty($subname, "remove $tmpdir ");
-    remove_tree($tmpdir, {error => \my $err});
-    if (@$err) {
-        foreach my $diag (@$err) {
-            print(STREAM check_exit_code($?));
-            logger($subname, "Failed to remove $diag->[0]: $diag->[1]\n", 2);
-        }
-    } else {
-        # pretty("$subname", "remove $tmpdir");
-        print(STREAM check_exit_code($?));
-    }
-
-    # frag out!
-    pretty("$subname", "$tmpfile_pango > $output ");
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# palette {{{
-sub impalette {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}   // '';
-    my $number = $opts->{number}  // 16;
-    my $space  = $opts->{space}   // 'LAB';
-    my $type   = $opts->{type}    // 'hex';
-    my $alpha  = $opts->{alpha}   // 1;
     # }}}
 
-    my @input = split(",", $inputs);
+    # round {{{
+    sub round {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
 
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}        // '';
+        my $output = $opts->{output}       // '';
+        my $round  = $opts->{round}        // 25;
+        my %color = (
+            background => $opts->{color_background} // $default{color}{background},
+            foreground => $opts->{color_foreground} // $default{color}{foreground},
+        );
+        # }}}
 
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        my @input = split(",", $inputs);
+        my $sqrp = $round;
 
-    pretty("$subname", "$input[0] ");
-    my @exe = (
-        $runner,
-        $input[0],
-        "-format", '%c',
-        "-colorspace", $space,
-        "-colors", $number,
-        "histogram:info:-",
-    );
+        my $x = `$identify -format '\%w' $input[0]`;
+        my $y = `$identify -format '\%h' $input[0]`;
+        my $xmid = $x // 2;
+        my $ymid = $y // 2;
 
-    my $tmp_output = `@exe`;
-    my $exit_code = $? >> 8;
-    chomp($tmp_output) if $tmp_output;
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
 
-    my @palette;
-    my @_output = split("\n", $tmp_output);
-    foreach my $line (@_output) {
-        my $color;
-        my ($id, $kernel, $hex, $rgb) = split(" ", $line);
-        if ($alpha) {
-            # no alpha channel
-            $hex =~ s/(.{6})..$/$1/;
-            $rgb =~ s/(.*)\((.*),(.*),(.*),(.*)\)$/$1($2,$3,$4)/;
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
 
-            # # also return the alpha channel
-            # $hex =~ s/(.{7})(.{2})$/hex:$1 alpha:$2/;
-            # $rgb =~ s/(.*)\((.*),(.*),(.*),(.*)\)$/$1($2,$3,$4) a($5)/;
-        }
-        $color = $hex if $type eq 'hex';
-        $color = $rgb if $type eq 'rgb';
-        $color = "$hex $rgb" if $type eq 'all';
-        push(@palette, $color) if $color;
+        mob::pretty($subname, "round borders");
+        my @exe = (
+            $runner,
+            $input[0], "\(",
+                "+clone", "-alpha", "extract",
+                "-draw", "fill $color{background} polygon 0,0 0,15 15,0 fill $color{foreground} circle 16,15 15,0", "\(",
+                    "+clone", "-flip",
+                "\)",
+                "-compose", "Multiply", "-composite", "\(",
+                    "+clone", "-flop",
+                "\)",
+                "-compose", "Multiply", "-composite",
+            "\)",
+            "-alpha", "off", "-compose", "CopyOpacity", "-composite",
+            $output,
+        );
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
     }
-
-    print(STREAM check_exit_code($exit_code));
-    return @palette;
-}
-# }}}
-
-# string {{{
-sub imstring {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs = $opts->{input}   // 'null';
-    my $output = $opts->{output}  // '';
-    my $text   = $opts->{text}    // '';
-    my $scale  = $opts->{scale}   // 1;
-    my $width  = $opts->{width}   // 800;
-    my $height = $opts->{height}  // 600;
-    my $ltr    = $opts->{ltr}     // 'caption';  # pango
-    my %font = (
-        name => $opts->{font}     // $default{font}{sans},
-        size => $opts->{size}     // 0,
-    );
-    my %gap = (
-        i => $opts->{gap_i}    // 0,
-        x => $opts->{gap_x}    // 0,
-        y => $opts->{gap_y}    // 0,
-    );
-    my %color  = (
-        foreground => $opts->{color_foreground}  // 'black',
-        background => $opts->{color_background}  // 'white',
-    );
     # }}}
 
-    logger($subname, "text is not specified\n", 3) unless $text;
-    logger($subname, "output image is not specified\n", 3) unless $output;
+    # shot -- WIP {{{
+    # TODO: bring the dmenu-shot here
+    sub shot {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
 
-    my @input;
-    my $merge = 0;
-    my $generate = 0;
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}        // '';
+        my $output = $opts->{output}       // '';
+        # }}}
 
-    if ($inputs && $inputs ne 'null') {
-        @input = split(",", $inputs);
-        $merge = 1;
-    } else {
-        logger($subname, "input is not specified\n", 2);
-        $generate = 1;
+        my @input = split(",", $inputs);
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        my $shot_directory = "${home}/pictures/screenshots";
+        make_path($shot_directory) unless -d $shot_directory;
+
+        mob::pretty($subname, "take a shot");
+        my @exe = (
+            $runner,
+            "-trim",
+            $input[0],
+            $output,
+        );
+
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
     }
+    # }}}
 
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
-    my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
-    my $tmpfile_text = "$tmpdir/imagemagick-tmp-text.png";
-    my $tmpfile_image = "$tmpdir/imagemagick-tmp-image.png";
+    # title {{{
+    sub title {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
 
-    if ($merge) {
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs   = $opts->{input}    // '';
+        my $output   = $opts->{output}   // '';
+    	my $window   = $opts->{window}   // 1;;
+    	my $title    = $opts->{title}    // 'Source Code';;
+        my $font     = $opts->{font}     // $default{font}{sans};;
+        my $vertical = $opts->{vertical} // '-0';;
+        my $size     = $opts->{size}     // $default{font}{size};;
+        my %color = (
+            background => $opts->{color_background} // $default{color}{background},
+            foreground => $opts->{color_foreground} // $default{color}{foreground},
+            temperory  => $opts->{color_temperory}  // $default{color}{temperory},
+            button => {
+                close => $opts->{color_button_close} // '#ff5f56', # '#9999A0',
+                maxim => $opts->{color_button_maxim} // '#5fc451', # '#9999A0',
+                minim => $opts->{color_button_minim} // '#ffbd2e', # '#9999A0',
+            },
+        );
+        my %border = (
+            rate => 20,
+        );
+        # }}}
+
+        my @input = split(",", $inputs);
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+
+        my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
+        my $tmpfile_title_bar = "$tmpdir/imagemagick-tmp-title-bar.png";
+        my $tmpfile_title_button = "$tmpdir/imagemagick-tmp-title-button.png";
         make_path($tmpdir);
-        $generate = 0;
-    }
-    if ($generate) {
-        logger($subname, "missing input file, an empty image will be generated\n", 2);
-        $tmpfile_text = $output;
-        $input[0] = $output;
-        $merge = 0;
-    }
 
-    # print("width: $width\n");
-    # print("height: $height\n");
-    if ($merge) {
         my %resolution = (
             a => `$identify -format '%wx%h' $input[0]`,
             x => `$identify -format '%w' $input[0]`,
             y => `$identify -format '%h' $input[0]`,
         );
-        $width = $resolution{x} / $scale;
-        $height = $resolution{y} / $scale;
-    }
-    # print("width: $width\n");
-    # print("height: $height\n");
-    # # exit 0;
+        my %resolution_out = (
+            x => $resolution{x} + $border{rate},
+            y => $resolution{y} + $border{rate},
+        );
 
-    my $resolution = "${width}x$height";
-    my $inner_gap;
-    my $inner_width;
-    my $inner_height;
-    my $inner_resolution = $resolution;
-    if ($gap{i}) {
-        $inner_gap        = $gap{i} * 100;
-        $inner_width      = $width - $inner_gap;
-        $inner_height     = $height - $inner_gap;
-        $inner_resolution = "${inner_width}x$inner_height";
-    }
+        my $width = $resolution{x};
+        my $height = $border{rate} + $border{rate};
 
-    pretty("$subname", "$input[0] > $output ");
-    if ($merge) {
-        $color{background} = 'none';
-    }
-    my @exe = (
-        $runner,
-            "-gravity", "West",
-            "-background", $color{background},
+        my $_tmpfile_title_button = (split("/", $tmpfile_title_button))[-1];
+        my $_tmpfile_title_bar    = (split("/", $tmpfile_title_bar))[-1];
+
+        mob::pretty($subname, "template base image for frame title");
+        my @exe = (
+            $runner,
+            "-size", "${width}x$height",
+            "gradient:$color{temperory}-$color{background}",
+            "-font", $font,
+            "-pointsize", $size,
             "-fill", $color{foreground},
-            "-size", $inner_resolution,
-            "-font", $font{name},
-    );
-    push(@exe, ("-pointsize", $font{size})) if $font{size};
-    push(@exe, (
-        "${ltr}:$text",
-        "-background", $color{background},
-        "-gravity", "Center",
-        "-extent", $resolution,
-        $tmpfile_text
-    ));
-    my $_exit_code = shell(@exe);
+            "-gravity", "center",
+            "-annotate", "+000$vertical", $title,
+            $tmpfile_title_bar,
+        );
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
 
-    if ($merge) {
-        # imtrim({input => $tmpfile_text, output => $tmpfile_text});
-        # clean();
+        mob::pretty($subname, "create frame bar");
+        @exe = (
+            $runner,
+                $tmpfile_title_bar,
+                "-fill", $color{button}{close}, "-draw", "circle 20,19 27,19",
+                "-fill", $color{button}{minim}, "-draw", "circle 44,19 51,19",
+                "-fill", $color{button}{maxim}, "-draw", "circle 68,19 75,19",
+                $tmpfile_title_button,
+        );
+        $_exit_code = mob::shell(@exe);
+        $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
 
-        imresize({input => $tmpfile_text, output => $tmpfile_text, resolution_a => $resolution});
-        clean();
+        mob::log($subname, "missing file: $tmpfile_title_button\n", 3) unless -f $tmpfile_title_button;
+        mob::log($subname, "missing file: $tmpfile_title_bar\n", 3) unless -f $tmpfile_title_bar;
 
-        immerge({input => "$tmpfile_text,$input[0]", output => $output});
-        clean();
-    }
+        job::append({input => "$tmpfile_title_button,$input[0]", output => $output, vertical => 1});
+        mob::clean();
 
-    pretty($subname, "remove $tmpdir ");
-    remove_tree($tmpdir, {error => \my $err});
-    if (@$err) {
-        foreach my $diag (@$err) {
-            print(STREAM check_exit_code($?));
-            logger($subname, "Failed to remove $diag->[0]: $diag->[1]\n", 2);
+        mob::pretty($subname, "remove $tmpdir");
+        remove_tree($tmpdir, {error => \my $err});
+        if (@$err) {
+            foreach my $diag (@$err) {
+                print(STREAM mob::check_exit_code($?));
+                print "\n";
+                mob::log($subname, "Failed to remove $diag->[0]: $diag->[1]\n", 2);
+            }
+        } else {
+            mob::pretty($subname, "remove $tmpdir");
+            print(STREAM mob::check_exit_code($?));
+            print "\n";
         }
-    } else {
-        print(STREAM check_exit_code($?));
+
+        mob::pretty($subname, "add window-frame like title");
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
     }
-
-    pretty("$subname", "$input[0] > $output ");
-    my $exit_code = $_exit_code >> 8;
-    print(STREAM check_exit_code($exit_code));
-}
-# }}}
-
-# trim {{{
-sub imbox {
-    my $subname = (split(":", (caller(0))[3]))[-1];
-
-    # params {{{
-    my ($opts) = @_; # hashref
-    $opts ||= {};
-    my $inputs      = $opts->{input}       // '';
-    my $output      = $opts->{output}      // '';
-    my $color       = $opts->{color}       // '';
-    my $mirror      = $opts->{mirror}      // 0;
-    my $rotate      = $opts->{rotate}      // 0;
     # }}}
 
-    my @input  = split(",", $inputs);
-    my @colors = split(",", $color);
-    my $count  = scalar @colors;
+    # extend {{{
+    sub extend {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
 
-    my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs   = $opts->{input}        // '';
+        my $output   = $opts->{output}       // '';
+        my $mirror   = $opts->{mirror}       // 0;
+        my $gradient = $opts->{gradient}     // 0;
+        my %color  = (
+            background => $opts->{color_background} // $default{color}{background},
+            temperory  => $opts->{color_temperory}  // $default{color}{temperory},
+            border     => $opts->{color_border}     // $default{color}{border},
+        );
+        my $rate   = $opts->{rate}  // 2;
+        my %shadow = (
+            width => $opts->{shadow_width} // 0,
+            color => $opts->{shadow_color} // "black",
+            rate  => $opts->{shadow_rate}  // 0,
+        );
+        my %offset = (
+            x     => 0,
+            y     => 0,
+        );
+        my $background_color = $opts->{background_color} // $default{color}{background};
+        # }}}
 
-    logger($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
-    logger($subname, "No input image is specified\n", 3) unless $input[0];
-    logger($subname, "No output image is specified\n", 3) unless $output;
+        my @input = split(",", $inputs);
 
-    pretty("$subname", "$input[0] > $output ");
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
 
-    my $fix;
-    my $x = `$identify -format "%w" "@{input}"`;
-    my $y = `$identify -format "%h" "@{input}"`;
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        # mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
 
-    if ($x ge $y) {
-        $fix = $x;
-    } else {
-        $fix = $y;
+        my $x = `$identify -format '\%w' $input[0]`;
+        my $y = `$identify -format '\%h' $input[0]`;
+        my $W = $x + $rate;
+        my $H = $y + $rate;
+
+        ($color{background}, $color{temperory}) = ($color{temperory}, $color{background}) if $mirror;
+
+        mob::pretty($subname, "extend image by color");
+        my @exe;
+        unless ($gradient) {
+            $color{temperory} = $color{background};
+        }
+        @exe = (
+            $runner,
+            '(',
+                '-size', "${W}x${H}",
+                "gradient:$color{background}-$color{temperory}",
+            ')',
+            '(',
+                $input[0],
+                '(',
+                    '+clone',
+                    '-background', $shadow{color},
+                    '-shadow', "$shadow{width}x$shadow{rate}+$offset{x}+$offset{y}",
+                ')',
+                '+swap',
+                '-background', 'none',
+                '-layers', 'merge',
+            ')',
+            '-gravity', 'center',
+            '-compose', 'over',
+            '-composite',
+            $output,
+        );
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
     }
+    # }}}
 
-    if ($count) {
-        if ($count gt 1) {
-            imgradient({
-                input => $input[0],  # <1> loop over it if it's possible
+    # src {{{
+    sub src {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs     = $opts->{input}      // '';
+        my $output     = $opts->{output}     // '';
+        my $language   = $opts->{language}   // '';
+        my $linenumber = $opts->{linenumber} // 0;
+        my $theme      = $opts->{theme}      // 'gruvbox-dark';
+        my %font = (
+            name => $opts->{font_name} // $default{font}{mono},
+            size => $opts->{font_size} // $default{font}{size},
+        );
+        my %frame = (
+            title => $opts->{frame_title} // 'Source Code',
+        );
+        my $round  = $opts->{round}          // 5;
+        my %shadow = (
+            apply  => $opts->{shadow_apply}  // 0,
+            color  => $opts->{shadow_color}  // 'black',
+            width  => $opts->{shadow_width}  // 110,
+            rate   => $opts->{shadow_rate}   // 10,
+        );
+        my %color = (
+            border     => $opts->{color_border}     // $default{color}{border},
+            frame      => $opts->{color_frame}      // $default{color}{frame},
+            background => $opts->{color_background} // $default{color}{background},
+            foreground => $opts->{color_foreground} // $default{color}{foreground},
+            gradient   => {
+                first  => $opts->{color_gradient_first}  // '#9F8F6D',
+                second => $opts->{color_gradient_second} // '#6F8B88',
+            },
+        );
+        my %alpha = (
+            apply       => $opts->{alpha_apply} // 1,
+            width       => $opts->{alpha_width} // 20,
+        );
+        my %border = (
+            width       => $opts->{border_width} // 25,
+        );
+        my %gradient = (
+            apply  => $opts->{gradient_apply}    // 1,
+            mirror => $opts->{gradient_mirror}   // 0,
+            rotate => $opts->{gradient_rotate}   // 0,
+            width  => $opts->{gradient_width}    // 100,
+            height => $opts->{gradient_height}   // 160,
+            orientation => $opts->{gradient_orientation} // "vertical",
+        );
+        # }}}
+
+        my @input = split(",", $inputs);
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+
+        my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
+        my $tmpfile_nl = "$tmpdir/imagemagick-tmp-nl.txt";
+        my $tmpfile_pango = "$tmpdir/imagemagick-tmp-pango.xml";
+        my $tmpfile_image = "$tmpdir/imagemagick-tmp-image.png";
+        make_path($tmpdir);
+
+        # add line numbering to the src image
+        if ($linenumber) {
+            my @job_add_line_number = (
+                "nl", "-b", "a", $input[0]
+            );
+            open my $output_fh, '>', $tmpfile_nl or die "Could not open '$tmpfile_nl': $!";
+            open my $nl_fh, '-|', @job_add_line_number or die "Could not execute nl: $!";
+            while (my $line = <$nl_fh>) {
+                print $output_fh $line;
+            }
+            close $nl_fh;
+            close $output_fh;
+        } else {
+            $tmpfile_nl = $input[0];
+        }
+
+        # get the language for syntax highlighting
+        $language = mob::get_syntax($input[0]) unless $language;
+
+        # generate pango
+        mob::pretty($subname, "generate src pango");
+        my @exe = (
+            $highlighter,
+                $tmpfile_nl,
+                "-O", "style=$theme",
+                "-O", "bgcolor=base03",
+                "-f", "pango",
+                "-o", $tmpfile_pango
+        );
+        push(@exe, ("-l", $language)) if $language;
+        my $_exit_code = mob::shell(@exe);
+        my $exit_code = $_exit_code >> 8;
+        mob::check_exit_code($exit_code);
+        print "\n";
+
+        # generate image
+        mob::pretty($subname, "generate src frame");
+        @exe = (
+            $runner,
+            "-background", $color{background},
+            "-pointsize", $font{size},
+            "pango:\@$tmpfile_pango",
+            $tmpfile_image,
+        );
+        $_exit_code = mob::shell(@exe);
+        $exit_code = $_exit_code >> 8;
+        mob::check_exit_code($exit_code);
+        print "\n";
+
+        # extra filters and visual effects
+        job::trim({input => $tmpfile_image, output => $output}); mob::clean();
+        job::shadow({
+            input => $output,
+            output => $output,
+            shadow_width => 0,
+            shadow_rate  => 0,
+            border_width => $border{width},
+            border_color => '#151515',
+            background_color => 'none',
+        }); mob::clean();
+        job::trim({input => $output, output => $output});
+            mob::clean();
+        job::title({input => $output, output => $output, frame_title => $frame{title}, background_color => $color{background}});
+            mob::clean();
+        job::round({input => $output, output => $output, round => $round});
+            mob::clean();
+        job::extend({input => $output, output => $output, rate => 2});
+            mob::clean();
+        job::round({input => $output, output => $output, round => $round});
+            mob::clean();
+        job::extend({input => $output, output => $output, rate => 2, mirror => 1});
+            mob::clean();
+        job::round({input => $output, output => $output, round => $round});
+            mob::clean();
+        job::extend({input => $output, output => $output, rate => 2});
+            mob::clean();
+        job::round({input => $output, output => $output, round => $round});
+            mob::clean();
+        # job::extend({input => $output, output => $output, rate => 1, mirror => 1});
+        #   mob::clean();
+        # job::round({input => $output, output => $output, round => $round});
+        #   mob::clean();
+        if ($alpha{apply}) {
+            job::extend({input => $output, output => $output, rate => $alpha{width}, gradient => 0, color_background => 'none'});
+                mob::clean();
+        }
+        if ($shadow{apply}) {
+            job::shadow({
+                input => $output,
                 output => $output,
-                color_first => $color[0],
-                color_second => $color[1],
+                shadow_width => $shadow{width},
+                shadow_rate  => $shadow{rate},
+                shadow_color => $shadow{color},
+                border_width => 10,
+            });
+            mob::clean();
+        }
+        if ($shadow{apply}) {
+            job::shadow({
+                input => $output,
+                output => $output,
+                shadow_width => $shadow{width},
+                shadow_rate  => $shadow{rate} * 10,
+                shadow_color => $shadow{color},
+                border_width => 10,
+            });
+            mob::clean();
+        }
+        if ($gradient{apply}) {
+            job::gradient({
+                input => $output,
+                output => $output,
+                color_first => $color{gradient}{first},
+                color_second => $color{gradient}{second},
                 gradient_width => "",
                 gradient_height => "",
-                border_rate => 0,
-                x => $fix,
-                y => $fix,
-                rotate => $rotate,
-                mirror => $mirror,
+                mirror => $gradient{mirror},
+                rotate => $gradient{rotate},
+                orientation => $gradient{orientation},
             });
+            mob::clean();
+        }
+
+        # clean up the mess
+        mob::pretty($subname, "remove $tmpdir");
+        remove_tree($tmpdir, {error => \my $err});
+        if (@$err) {
+            foreach my $diag (@$err) {
+                print(STREAM mob::check_exit_code($?));
+                print "\n";
+                mob::log($subname, "Failed to remove $diag->[0]: $diag->[1]\n", 2);
+            }
         } else {
-            my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
-            my $tmpfile = "$tmpdir/imagemagick-tmp-box.png";
+            mob::pretty($subname, "remove $tmpdir");
+            print(STREAM mob::check_exit_code($?));
+            print "\n";
+        }
+
+        # frag out!
+        mob::pretty($subname, "src shot window");
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+    }
+    # }}}
+
+    # palette {{{
+    sub palette {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}   // '';
+        my $number = $opts->{number}  // 16;
+        my $space  = $opts->{space}   // 'LAB';
+        my $type   = $opts->{type}    // 'hex';
+        my $alpha  = $opts->{alpha}   // 1;
+        # }}}
+
+        my @input = split(",", $inputs);
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+
+        mob::pretty($subname, "generate palette");
+        my @exe = (
+            $runner,
+            $input[0],
+            "-format", '%c',
+            "-colorspace", $space,
+            "-colors", $number,
+            "histogram:info:-",
+        );
+
+        my $tmp_output = `@exe`;
+        my $exit_code = $? >> 8;
+        chomp($tmp_output) if $tmp_output;
+
+        my @palette;
+        my @_output = split("\n", $tmp_output);
+        foreach my $line (@_output) {
+            my $color;
+            my ($id, $kernel, $hex, $rgb) = split(" ", $line);
+            if ($alpha) {
+                # no alpha channel
+                $hex =~ s/(.{6})..$/$1/;
+                $rgb =~ s/(.*)\((.*),(.*),(.*),(.*)\)$/$1($2,$3,$4)/;
+
+                # # also return the alpha channel
+                # $hex =~ s/(.{7})(.{2})$/hex:$1 alpha:$2/;
+                # $rgb =~ s/(.*)\((.*),(.*),(.*),(.*)\)$/$1($2,$3,$4) a($5)/;
+            }
+            $color = $hex if $type eq 'hex';
+            $color = $rgb if $type eq 'rgb';
+            $color = "$hex $rgb" if $type eq 'all';
+            push(@palette, $color) if $color;
+        }
+
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+        return @palette;
+    }
+    # }}}
+
+    # string {{{
+    sub string {
+        my $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs = $opts->{input}   // 'null';
+        my $output = $opts->{output}  // '';
+        my $scale  = $opts->{scale}   // 1;
+        my $alpha  = $opts->{alpha}   // 0;
+        my $text   = join("\n", @{ $opts->{text} // [] });
+        my $width  = $opts->{width}   // 800;
+        my $height = $opts->{height}  // 600;
+        my $ltr    = $opts->{ltr}     // 'caption';  # pango
+        my %font = (
+            name => $opts->{font}     // $default{font}{sans},
+            size => $opts->{size}     // 0,
+        );
+        my %gap = (
+            i => $opts->{gap_i}    // 0,
+            x => $opts->{gap_x}    // 0,
+            y => $opts->{gap_y}    // 0,
+        );
+        my %color  = (
+            foreground => $opts->{color_foreground}  // 'black',
+            background => $opts->{color_background}  // 'white',
+        );
+        # }}}
+
+        mob::log($subname, "text is not specified\n", 3) unless $text;
+        mob::log($subname, "output image is not specified\n", 3) unless $output;
+
+        my @input;
+
+        my $merge = 0;
+        my $generate = 0;
+
+        if ($inputs && $inputs ne 'null') {
+            @input = split(",", $inputs);
+            $merge = 1;
+        } else {
+            mob::log($subname, "input is not specified\n", 2);
+            $generate = 1;
+        }
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+        my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
+        my $tmpfile_text = "$tmpdir/imagemagick-tmp-text.png";
+        my $tmpfile_image = "$tmpdir/imagemagick-tmp-image.png";
+
+        if ($merge) {
             make_path($tmpdir);
-            imsolid({
-                width => $fix,
-                height => $fix,
-                background => $color[0],
-                output => $tmpfile,
+            $generate = 0;
+        }
+        if ($generate) {
+            mob::log($subname, "missing input file, an empty image will be generated\n", 2);
+            $tmpfile_text = $output;
+            $input[0] = $output;
+            $merge = 0;
+        }
+
+        # print("width: $width\n");
+        # print("height: $height\n");
+        if ($merge) {
+            my %resolution = (
+                a => `$identify -format '%wx%h' $input[0]`,
+                x => `$identify -format '%w' $input[0]`,
+                y => `$identify -format '%h' $input[0]`,
+            );
+            $width = $resolution{x} / $scale;
+            $height = $resolution{y} / $scale;
+        }
+        # print("width: $width\n");
+        # print("height: $height\n");
+        # # exit 0;
+
+        my $resolution = "${width}x$height";
+        my $inner_gap;
+        my $inner_width;
+        my $inner_height;
+        my $inner_resolution = $resolution;
+        if ($gap{i}) {
+            $inner_gap        = $gap{i} * 100;
+            $inner_width      = $width - $inner_gap;
+            $inner_height     = $height - $inner_gap;
+            $inner_resolution = "${inner_width}x$inner_height";
+        }
+
+        if ($merge) {
+            $color{background} = 'none';
+        }
+        my @exe = (
+            $runner,
+                "-gravity", "West",
+                "-background", $color{background},
+                "-fill", $color{foreground},
+                "-size", $inner_resolution,
+                "-font", $font{name},
+        );
+        push @exe, "-transparent", $color{background} if $alpha;
+        push(@exe, ("-pointsize", $font{size})) if $font{size};
+        push(@exe, (
+            "${ltr}:$text",
+            "-background", $color{background},
+            "-gravity", "Center",
+            "-extent", $resolution,
+            $tmpfile_text
+        ));
+        mob::pretty($subname, "string to image");
+        my $_exit_code = mob::shell(@exe);
+        print(STREAM mob::check_exit_code($_exit_code));
+        print "\n";
+
+        if ($merge) {
+            # job::trim({input => $tmpfile_text, output => $tmpfile_text});
+            # mob::clean();
+
+            job::resize({input => $tmpfile_text, output => $tmpfile_text, resolution_a => $resolution});
+            mob::clean();
+
+            job::merge({input => "$tmpfile_text,$input[0]", output => $output});
+            mob::clean();
+        }
+
+        mob::pretty($subname, "remove $tmpdir");
+        # print(STREAM mob::check_exit_code(0));
+        # print "\n";
+        remove_tree($tmpdir, {error => \my $err});
+        if (@$err) {
+            foreach my $diag (@$err) {
+                print(STREAM mob::check_exit_code(1));
+                print "\n";
+                mob::log($subname, "Failed to remove $diag->[0]: $diag->[1]\n", 2);
+            }
+        } else {
+            print(STREAM mob::check_exit_code(0));
+            print "\n";
+        }
+
+        mob::pretty($subname, "generate picture");
+        my $exit_code = $_exit_code >> 8;
+        print(STREAM mob::check_exit_code($exit_code));
+        print "\n";
+    }
+    # }}}
+
+    # box {{{
+    sub box {
+        my $subname = (split(":", (caller(0))[3]))[-1];
+        $subname = (caller(0))[3];
+
+        # params {{{
+        my ($opts) = @_; # hashref
+        $opts ||= {};
+        my $inputs      = $opts->{input}       // '';
+        my $output      = $opts->{output}      // '';
+        my $color       = $opts->{color}       // '';
+        my $mirror      = $opts->{mirror}      // 0;
+        my $rotate      = $opts->{rotate}      // 0;
+        my $expand      = $opts->{expand}      // 0;
+        # }}}
+
+        my @input  = split(",", $inputs);
+        my @colors = split(",", $color);
+        my $count  = scalar @colors;
+
+        my $timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime);
+
+        mob::log($subname, "missing file: input: $input[0]: No such file or directory\n", 3) unless -f $input[0];
+        mob::log($subname, "No input image is specified\n", 3) unless $input[0];
+        mob::log($subname, "No output image is specified\n", 3) unless $output;
+
+        my $fix;
+        my $x = `$identify -format "%w" "@{input}"`;
+        my $y = `$identify -format "%h" "@{input}"`;
+
+        $x = $x + $expand if $expand;
+        $y = $y + $expand if $expand;
+
+        if ($x <= $y) {
+            $fix = $y;
+        } else {
+            $fix = $x;
+        }
+
+        if ($count) {
+            if ($count gt 1) {
+                job::gradient({
+                    input => $input[0],  # <1> loop over it if it's possible
+                    output => $output,
+                    color_first => $color[0],
+                    color_second => $color[1],
+                    gradient_width => "",
+                    gradient_height => "",
+                    border_rate => 0,
+                    x => $fix,
+                    y => $fix,
+                    rotate => $rotate,
+                    mirror => $mirror,
+                });
+            } else {
+                my $tmpdir = "/tmp/imagemagick/$timestamp-$subname";
+                my $tmpfile = "$tmpdir/imagemagick-tmp-box.png";
+                make_path($tmpdir);
+                job::solid({
+                    width => $fix,
+                    height => $fix,
+                    background => $color[0],
+                    output => $tmpfile,
+                });
+                job::merge({
+                    input => sprintf("%s,%s", $input[0], $tmpfile),
+                    output => $output,
+                });
+                remove_tree($tmpdir);
+            }
+        } else {
+            job::blur({
+                input => join(",", @input),
+                output => $output,
+                geo => sprintf("%sx%s", $fix, $fix),
+                blur => $blur,
+                rate => $rate,
+                scale => $scale,
             });
-            immerge({
-                input => sprintf("%s,%s", $input[0], $tmpfile),
+            job::merge({
+                input => sprintf("%s,%s", $input[0], $output),
                 output => $output,
             });
-            remove_tree($tmpdir);
         }
-    } else {
-        imblur({
-            input => join(",", @input),
-            output => $output,
-            geo => sprintf("%sx%s", $fix, $fix),
-        });
-    immerge({
-            input => sprintf("%s,%s", $input[0], $output),
-            output => $output,
-        });
+
+        mob::pretty($subname, "1:1 boxed image");
+        print(STREAM mob::check_exit_code(0));
+        print "\n";
+
     }
+    # }}}
 
-    # my @exe = (
-    #     $runner,
-    #     "-trim",
-    #     $input[0],
-    #     $output,
-    # );
-    #
-    # my $_exit_code = shell(@exe);
-    # my $exit_code = $_exit_code >> 8;
-    # print(STREAM check_exit_code($exit_code));
 }
-# }}}
-
 # }}}
 
 if ($help || !$cmd || $cmd eq "help") {
-    print_usage();
+    mob::usage();
+    exit 0;
 }
 
-print(STREAM "] $date $prompt $cmd\n");
-
-if ($cmd eq "list") {
-    print(STREAM "] List of valid commands:\n");
-    foreach my $ss (@subs) {
-        print(STREAM "    $ss\n");
-    }
-}
+# print(STREAM "] $date $prompt $cmd\n");
 
 # main {{{
 if ($cmd eq "shadow") {
-    imshadow({
+    job::shadow({
         input => join(",", @input),
         output => $output,
         shadow_color => $background,
-    })
+        # shadow_color => join(",", @color),
+        shadow_width => $width,
+        shadow_rate  => $rate,
+        border_width => $border,
+    });
+    exit 0;
 }
 
 if ($cmd eq "round") {
-    imround({
+    job::round({
         input => join(",", @input),
         output => $output,
         round => $round,
+        color_background => $background,
+        color_foreground => $foreground,
     });
+    exit 0;
 }
 
 if ($cmd eq "src") {
-    imsrc({
+    job::src({
         input => join(",", @input),
         output => $output,
         language => $language,
+        frame_title => "@text",
         linenumber => $linenumber,
         alpha_apply => $alpha,
         alpha_width => 20,
@@ -1985,10 +2074,11 @@ if ($cmd eq "src") {
         color_gradient_first => $gradient_color[0],
         color_gradient_second => $gradient_color[1],
     });
+    exit 0;
 }
 
 if ($cmd eq "palette") {
-    my @palette = impalette({
+    my @palette = job::palette({
         input => @input,
         type => $palette,
     });
@@ -1996,49 +2086,58 @@ if ($cmd eq "palette") {
     foreach my $color (@palette) {
         print(STREAM "  $color\n");
     }
+    exit 0;
 }
 
 
 if ($cmd eq "append") {
-    imappend({
+    job::append({
         input => join(",", @input),
         output => $output,
+        background => $background,
         horizontal => $horizontal,
         vertical => $vertical,
+        position => $position,
     });
+    exit 0;
 }
 
 if ($cmd eq "merge") {
-    immerge({
+    job::merge({
         input => join(",", @input),
         output => $output,
     });
+    exit 0;
 }
 
 if ($cmd eq "trim") {
-    imtrim({
+    job::trim({
         input => join(",", @input),
         output => $output,
     });
+    exit 0;
 }
 
 if ($cmd eq "string") {
     @input = ('null') unless @input;
-    imstring({
+    job::string({
         input => @input,
         output => $output,
         width => $width,
         height => $height,
-        text => $text,
+        text => \@text,
         font => $font,
+        alpha => $alpha,
+        scale => $scale,
         color_background => $background,
         color_foreground => $foreground,
         size => $size,
     });
+    exit 0;
 }
 
 if ($cmd eq "extend") {
-    imextend({
+    job::extend({
         input => join(",", @input),
         output => $output,
         color_background => $background,
@@ -2049,40 +2148,66 @@ if ($cmd eq "extend") {
         y => $height,
         gradient => $gradient,
     });
+    exit 0;
 }
 
 if ($cmd eq "crop") {
-    imcrop({
+    job::crop({
         input => join(",", @input),
         output => $output,
         shape => $shape,
     });
+    exit 0;
 }
 
 if ($cmd eq "solid") {
-    imsolid({
+    job::solid({
         width => $width,
         height => $height,
         background => $background,
         output => $output,
     });
+    exit 0;
+}
+
+if ($cmd eq "blend") {
+    job::blend({
+        input  => join(",", @input),
+        output => $output,
+        color  => $color[0],
+        rate   => $rate,
+        # scale => $scale,
+    });
+    exit 0;
 }
 
 if ($cmd eq "blur") {
-    imblur({
+    job::blur({
         input => join(",", @input),
         output => $output,
+        # geo => sprintf("%sx%s", $width, $height),
         # rate => $rate,
         # blur => $blur,
         # scale => $scale,
     });
+    exit 0;
+}
+
+if ($cmd eq "pixel") {
+    job::pixel({
+        input => join(",", @input),
+        output => $output,
+        rate => $rate,
+    });
+    exit 0;
 }
 
 if ($cmd eq "box") {
-    imbox({
+    job::box({
         input  => join(",", @input),
         output => $output,
         color  => join(",", @color),
+        expand => $expand,
         # color_first => $gradient_color[0],
         # color_second => $gradient_color[1],
         # gradient_width => "",
@@ -2091,10 +2216,11 @@ if ($cmd eq "box") {
         rotate => $rotation,
         # orientation => $orientation,
     });
+    exit 0;
 }
 
 if ($cmd eq "gradient") {
-    imgradient({
+    job::gradient({
         input => join(",", @input),
         output => $output,
         color_first => $gradient_color[0],
@@ -2105,9 +2231,12 @@ if ($cmd eq "gradient") {
         rotate => $gradient_rotation,
         orientation => $orientation,
     });
+    exit 0;
 }
 
 # }}}
 
+mob::log("", "Invalid command: $cmd");
 print("\n");
+mob::usage();
 
